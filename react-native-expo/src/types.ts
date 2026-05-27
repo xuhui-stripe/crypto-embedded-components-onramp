@@ -33,6 +33,8 @@ export interface PaymentToken {
 
 export type RootStackParamList = {
   Home: undefined;
+  /** Demo configuration: KYC tier and limit source. */
+  Settings: undefined;
   Auth: undefined;
   Register: { email: string; authToken: string };
   KYCPrimer: { customerId: string; authToken: string };
@@ -42,10 +44,12 @@ export type RootStackParamList = {
     authToken: string;
     firstName: string;
     lastName: string;
-    idNumber: string;
-    dobDay: number;
-    dobMonth: number;
-    dobYear: number;
+    /** Present for L1/L2 only — L0 skips SSN collection. */
+    idNumber?: string;
+    /** Present for L1/L2 only — L0 skips DOB collection. */
+    dobDay?: number;
+    dobMonth?: number;
+    dobYear?: number;
   };
   Wallet: { customerId: string; authToken: string };
   PaymentMethod: {
@@ -53,6 +57,57 @@ export type RootStackParamList = {
     authToken: string;
     walletAddress: string;
     network: string;
+  };
+  /**
+   * KYC step-up screen. Shown when session creation returns a KYC error.
+   * Collects only the incremental fields the user hasn't yet provided, based
+   * on the Stripe error code and their current verification status:
+   *
+   *   missing_identity_verification  + currentTier=L0 → collect SSN + DOB → attachKycInfo
+   *   missing_document_verification  + currentTier=L0 → collect SSN + DOB → attachKycInfo → verifyIdentity
+   *   missing_document_verification  + currentTier=L1 → verifyIdentity only
+   *
+   * After the SDK calls succeed, navigates to VerificationPending to wait
+   * for Stripe's async review before retrying the session.
+   */
+  KYCStepUp: {
+    customerId: string;
+    authToken: string;
+    /** Stripe error code from the failed session creation. */
+    errorCode:
+      | 'crypto_onramp_missing_minimum_identity_verification'
+      | 'crypto_onramp_missing_identity_verification'
+      | 'crypto_onramp_missing_document_verification';
+    /** kycStatus from getCryptoCustomer — used to determine the current tier. */
+    kycStatus: string;
+    /** idDocStatus from getCryptoCustomer — used to determine the current tier. */
+    idDocStatus: string;
+    // Original payment details — used to retry session creation after step-up.
+    walletAddress: string;
+    network: string;
+    sourceAmount: string;
+    sourceCurrency: string;
+    destinationCurrency: string;
+    paymentToken: string;
+    paymentLabel: string;
+  };
+  /**
+   * Verification pending screen. Polls getCryptoCustomer until the required
+   * verification is no longer pending, then retries session creation.
+   */
+  VerificationPending: {
+    customerId: string;
+    authToken: string;
+    /** Which verification we are waiting for Stripe to complete. */
+    requiredVerification: 'kyc_verified' | 'id_document_verified';
+    // Original payment details — used to create the session once verified.
+    walletAddress: string;
+    network: string;
+    sourceAmount: string;
+    sourceCurrency: string;
+    destinationCurrency: string;
+    paymentToken: string;
+    paymentLabel: string;
   };
   Checkout: {
     customerId: string;

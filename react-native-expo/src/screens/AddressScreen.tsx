@@ -7,6 +7,7 @@ import { useOnramp } from '../hooks/useOnramp';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
+import { useSettings } from '../context/SettingsContext';
 
 const STATE_NAMES: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -38,6 +39,8 @@ export default function AddressScreen({ navigation, route }: Props) {
   });
 
   const { attachKycInfo, verifyIdentity } = useOnramp();
+  // L2 tier adds a government-ID + selfie verification step after address submission.
+  const { settings } = useSettings();
 
   const handleSubmit = async () => {
     const { line1, city, state, postalCode } = form;
@@ -47,11 +50,13 @@ export default function AddressScreen({ navigation, route }: Props) {
     }
     setSubmitting(true);
     try {
-      const result = await attachKycInfo({
+      // Build the KYC payload with only the fields that were collected.
+      // L0 skips SSN and DOB (idNumber/dob* are undefined in route params),
+      // so we omit those fields from the attachKycInfo call.
+      // L1 and L2 include all fields.
+      const kycPayload: Parameters<typeof attachKycInfo>[0] = {
         firstName,
         lastName,
-        idNumber,
-        dateOfBirth: { day: dobDay, month: dobMonth, year: dobYear },
         address: {
           line1,
           line2: form.line2 || undefined,
@@ -60,16 +65,27 @@ export default function AddressScreen({ navigation, route }: Props) {
           postalCode,
           country: 'US',
         },
-      });
+        ...(idNumber ? { idNumber } : {}),
+        ...(dobDay && dobMonth && dobYear
+          ? { dateOfBirth: { day: dobDay, month: dobMonth, year: dobYear } }
+          : {}),
+      };
+      const result = await attachKycInfo(kycPayload);
 
       if (result?.error) {
         Alert.alert('KYC Error', result.error.message);
         return;
       }
 
-      const idResult = await verifyIdentity();
-      if (idResult?.error) {
-        console.log('Identity verification note:', idResult.error.message);
+      // L2 requires an additional identity-document verification step.
+      // For L0 and L1 we skip this and the user proceeds with their current
+      // KYC tier. If they later attempt a purchase above the tier's limit,
+      // the KYCStepUp screen will guide them through the upgrade.
+      if (settings.kycTier === 'L2') {
+        const idResult = await verifyIdentity();
+        if (idResult?.error) {
+          console.log('Identity verification note:', idResult.error.message);
+        }
       }
 
       navigation.navigate('Wallet', { customerId, authToken });

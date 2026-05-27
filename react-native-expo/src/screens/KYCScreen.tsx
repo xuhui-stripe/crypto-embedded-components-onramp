@@ -1,3 +1,22 @@
+/**
+ * KYCScreen — collect personal identity fields based on the configured KYC tier.
+ *
+ *   L0: First name + last name only. No SSN, no date of birth.
+ *       The user proceeds to AddressScreen which calls attachKycInfo with
+ *       just name + address. They will be prompted to provide SSN/DOB later
+ *       if they attempt a purchase above the L0 transaction limit.
+ *
+ *   L1: First name + last name + SSN + date of birth.
+ *       AddressScreen calls attachKycInfo with the full set of fields.
+ *
+ *   L2: Same fields as L1. AddressScreen additionally calls verifyIdentity()
+ *       to capture a government-issued ID document and selfie.
+ *
+ * Merchant note: the tier selection is purely for demo purposes. In a real
+ * integration you determine which fields to collect based on your compliance
+ * requirements and what the user's current KYC status already covers.
+ */
+
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -6,6 +25,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
+import { useSettings } from '../context/SettingsContext';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'KYC'>;
@@ -25,6 +45,11 @@ function maskSSN(raw: string): string {
 
 export default function KYCScreen({ navigation, route }: Props) {
   const { customerId, authToken } = route.params;
+  const { settings } = useSettings();
+
+  // L1/L2 collect SSN and DOB; L0 only collects name.
+  const collectSensitiveFields = settings.kycTier !== 'L0';
+
   const [form, setForm] = useState({
     firstName: '', lastName: '',
     dobDay: '', dobMonth: '', dobYear: '',
@@ -39,19 +64,36 @@ export default function KYCScreen({ navigation, route }: Props) {
 
   const handleNext = () => {
     const { firstName, lastName, dobDay, dobMonth, dobYear } = form;
-    if (!firstName || !lastName || ssnRaw.length !== 9 || !dobDay || !dobMonth || !dobYear) {
-      Alert.alert('Error', 'Please fill in all required fields.');
+
+    // Always require name.
+    if (!firstName || !lastName) {
+      Alert.alert('Error', 'Please enter your first and last name.');
       return;
     }
+
+    // L1/L2 additionally require SSN and date of birth.
+    if (collectSensitiveFields) {
+      if (ssnRaw.length !== 9 || !dobDay || !dobMonth || !dobYear) {
+        Alert.alert('Error', 'Please fill in all required fields.');
+        return;
+      }
+    }
+
+    // Navigate to AddressScreen. idNumber/dob are undefined for L0 — the
+    // Address screen will omit them from the attachKycInfo call.
     navigation.navigate('Address', {
       customerId,
       authToken,
       firstName,
       lastName,
-      idNumber: ssnRaw,
-      dobDay: parseInt(dobDay, 10),
-      dobMonth: parseInt(dobMonth, 10),
-      dobYear: parseInt(dobYear, 10),
+      ...(collectSensitiveFields
+        ? {
+            idNumber: ssnRaw,
+            dobDay: parseInt(dobDay, 10),
+            dobMonth: parseInt(dobMonth, 10),
+            dobYear: parseInt(dobYear, 10),
+          }
+        : {}),
     });
   };
 
@@ -63,32 +105,42 @@ export default function KYCScreen({ navigation, route }: Props) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Add your personal info</Text>
-      <Text style={styles.subtitle}>Enter your name, SSN, and date of birth</Text>
+      <Text style={styles.subtitle}>
+        {collectSensitiveFields
+          ? 'Enter your name, SSN, and date of birth'
+          : 'Enter your full name'}
+      </Text>
 
+      {/* Name — collected at every tier */}
       <Row label="First Name" value={form.firstName} onChange={set('firstName')} autoCapitalize="words" />
       <Row label="Last Name" value={form.lastName} onChange={set('lastName')} autoCapitalize="words" />
 
-      <View style={{ marginBottom: 16 }}>
-        <Text style={s.label}>Social Security Number</Text>
-        <TextInput
-          style={s.input}
-          value={ssnDisplay}
-          onChangeText={handleSSNChange}
-          onFocus={() => setSsnFocused(true)}
-          onBlur={() => setSsnFocused(false)}
-          placeholder="XXX-XX-XXXX"
-          placeholderTextColor="#555"
-          keyboardType="numeric"
-          maxLength={11}
-        />
-      </View>
+      {/* SSN + DOB — L1 and L2 only */}
+      {collectSensitiveFields && (
+        <>
+          <View style={{ marginBottom: 16 }}>
+            <Text style={s.label}>Social Security Number</Text>
+            <TextInput
+              style={s.input}
+              value={ssnDisplay}
+              onChangeText={handleSSNChange}
+              onFocus={() => setSsnFocused(true)}
+              onBlur={() => setSsnFocused(false)}
+              placeholder="XXX-XX-XXXX"
+              placeholderTextColor="#555"
+              keyboardType="numeric"
+              maxLength={11}
+            />
+          </View>
 
-      <Text style={styles.section}>Date of Birth</Text>
-      <View style={styles.row3}>
-        <SmallRow label="MM" value={form.dobMonth} onChange={set('dobMonth')} />
-        <SmallRow label="DD" value={form.dobDay} onChange={set('dobDay')} />
-        <SmallRow label="YYYY" value={form.dobYear} onChange={set('dobYear')} />
-      </View>
+          <Text style={styles.section}>Date of Birth</Text>
+          <View style={styles.row3}>
+            <SmallRow label="MM" value={form.dobMonth} onChange={set('dobMonth')} />
+            <SmallRow label="DD" value={form.dobDay} onChange={set('dobDay')} />
+            <SmallRow label="YYYY" value={form.dobYear} onChange={set('dobYear')} />
+          </View>
+        </>
+      )}
 
       <TouchableOpacity style={styles.button} onPress={handleNext}>
         <Text style={styles.buttonText}>Next</Text>
