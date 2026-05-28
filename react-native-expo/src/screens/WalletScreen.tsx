@@ -24,7 +24,7 @@ type Props = {
 };
 
 export default function WalletScreen({ navigation, route }: Props) {
-  const { customerId, authToken, kycTier } = route.params;
+  const { customerId, authToken } = route.params;
   const [existingWallets, setExistingWallets] = useState<ExistingWallet[]>([]);
   const [loadingWallets, setLoadingWallets] = useState(true);
   const [selectedWallet, setSelectedWallet] = useState<ExistingWallet | null>(null);
@@ -47,25 +47,11 @@ export default function WalletScreen({ navigation, route }: Props) {
     })();
   }, [customerId, authToken]);
 
-  // After a wallet is attached, route through VerificationPendingScreen when
-  // coming from the initial KYC onboarding flow (kycTier is set). The pending
-  // screen polls until Stripe finishes reviewing the KYC submission, then
-  // proceeds to PaymentMethod. If kycTier is absent (e.g. wallet management
-  // flows), go directly to PaymentMethod as before.
+  // After a wallet is attached, go to PaymentMethod. PaymentMethod will fetch
+  // the customer's kycTiers on mount and poll until any pending verification
+  // resolves before allowing the user to proceed.
   const goToNextScreen = (walletAddress: string, walletNetwork: string) => {
-    if (kycTier) {
-      navigation.navigate('VerificationPending', {
-        customerId,
-        authToken,
-        requiredVerification: kycTier === 'L2' ? 'id_document_verified' : 'kyc_verified',
-        tier: kycTier,
-        destination: 'PaymentMethod',
-        walletAddress,
-        network: walletNetwork,
-      });
-    } else {
-      navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress, network: walletNetwork });
-    }
+    navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress, network: walletNetwork });
   };
 
   const handleUseExisting = () => {

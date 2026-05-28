@@ -54,18 +54,22 @@ export type RootStackParamList = {
   Wallet: {
     customerId: string;
     authToken: string;
-    /**
-     * Passed from AddressScreen during initial KYC onboarding so WalletScreen
-     * knows which verification tier to wait for after the wallet is attached.
-     * Omitted when coming from other flows (e.g. wallet management).
-     */
-    kycTier?: 'L0' | 'L1' | 'L2';
   };
   PaymentMethod: {
     customerId: string;
     authToken: string;
     walletAddress: string;
     network: string;
+    /**
+     * Pre-filled when returning from a KYC step-up (VerificationPendingScreen
+     * Flow B). Carrying these params back lets PaymentMethod re-check limits
+     * for the new tier without asking the user to re-enter their card or amount.
+     * Omitted on the initial navigation from VerificationPendingScreen Flow A.
+     */
+    paymentToken?: string;
+    paymentLabel?: string;
+    sourceAmount?: string;
+    destinationCurrency?: string;
   };
   /**
    * KYC step-up screen. Shown when session creation returns a KYC error.
@@ -101,53 +105,6 @@ export type RootStackParamList = {
     destinationCurrency: string;
     paymentToken: string;
     paymentLabel: string;
-  };
-  /**
-   * VerificationPendingScreen polls getCryptoCustomer() until the required
-   * verification leaves the `pending` state, then continues the user's flow.
-   *
-   * This screen is reused for two distinct flows:
-   *
-   *   Flow A — Initial KYC onboarding (destination = 'PaymentMethod')
-   *     Reached from WalletScreen after the user attaches a wallet.
-   *     AddressScreen → WalletScreen → VerificationPendingScreen → PaymentMethodScreen
-   *     Set `tier` and `requiredVerification` so the screen knows what to watch.
-   *     `walletAddress` and `network` are required to navigate to PaymentMethod.
-   *     Session payment params (sourceAmount, paymentToken, etc.) are NOT needed.
-   *
-   *   Flow B — Payment step-up (destination omitted)
-   *     Reached from KYCStepUpScreen after the user provides extra identity
-   *     info to unlock a higher transaction limit. Once verified, this screen
-   *     automatically creates the onramp session and sends the user to checkout.
-   *     All payment params are required so the session can be created.
-   *
-   * See VerificationPendingScreen.tsx for the full flow diagram.
-   */
-  VerificationPending: {
-    customerId: string;
-    authToken: string;
-    /** Which verification to watch. Determines which status field to poll. */
-    requiredVerification: 'kyc_verified' | 'id_document_verified';
-    /**
-     * The customer's KYC tier (L0 / L1 / L2), used for the badge label.
-     * Flow A passes it from WalletScreen; Flow B derives it from requiredVerification.
-     */
-    tier?: 'L0' | 'L1' | 'L2';
-    /**
-     * Flow A only. Navigates to PaymentMethodScreen once verification passes.
-     * When omitted (Flow B), the screen creates an onramp session instead.
-     */
-    destination?: 'PaymentMethod';
-    // Required for both flows: walletAddress + network are needed to navigate
-    // to PaymentMethod (Flow A) or to create a session (Flow B).
-    walletAddress?: string;
-    network?: string;
-    // Flow B only — needed to create the onramp session.
-    sourceAmount?: string;
-    sourceCurrency?: string;
-    destinationCurrency?: string;
-    paymentToken?: string;
-    paymentLabel?: string;
   };
   Checkout: {
     customerId: string;

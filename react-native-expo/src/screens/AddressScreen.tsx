@@ -90,7 +90,7 @@ export default function AddressScreen({ navigation, route }: Props) {
 
       // Proceed to wallet attachment. kycTier is forwarded so WalletScreen
       // can route through VerificationPendingScreen after the wallet is attached.
-      navigation.navigate('Wallet', { customerId, authToken, kycTier: settings.kycTier });
+      navigation.navigate('Wallet', { customerId, authToken });
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {

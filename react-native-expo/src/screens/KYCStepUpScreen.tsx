@@ -137,13 +137,13 @@ export default function KYCStepUpScreen({ navigation, route }: Props) {
   const needsSsnDob = path === 'collect_ssn_dob' || path === 'collect_full_l1' || path === 'collect_ssn_dob_then_doc';
   const needsVerifyIdentity = path === 'collect_ssn_dob_then_doc' || path === 'verify_identity';
 
-  // After SDK calls succeed, navigate to VerificationPending.
-  // Stripe's identity review is asynchronous — never skip this screen.
-  const goToPending = (requiredVerification: 'kyc_verified' | 'id_document_verified') => {
-    navigation.replace('VerificationPending', {
-      customerId, authToken, requiredVerification,
-      walletAddress, network, sourceAmount, sourceCurrency,
-      destinationCurrency, paymentToken, paymentLabel,
+  // After SDK calls succeed, return to PaymentMethod with the original payment
+  // params pre-filled. PaymentMethod will fetch fresh kycTiers on mount, detect
+  // the pending verification, and poll until Stripe's review resolves.
+  const goToPaymentMethod = () => {
+    navigation.replace('PaymentMethod', {
+      customerId, authToken, walletAddress, network,
+      sourceAmount, destinationCurrency, paymentToken, paymentLabel,
     });
   };
 
@@ -209,10 +209,9 @@ export default function KYCStepUpScreen({ navigation, route }: Props) {
         if (idResult?.error) {
           console.log('[KYCStepUp] verifyIdentity note:', idResult.error.message);
         }
-        goToPending('id_document_verified');
-      } else {
-        goToPending('kyc_verified');
       }
+
+      goToPaymentMethod();
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
