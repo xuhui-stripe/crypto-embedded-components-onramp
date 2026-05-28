@@ -30,11 +30,18 @@ router.get('/crypto_customer/:customerId', async (req: Request, res: Response) =
     const kycStatus = verifications.find((v: any) => v.name === 'kyc_verified')?.status ?? 'not_started';
     const idDocStatus = verifications.find((v: any) => v.name === 'id_document_verified')?.status ?? 'not_started';
 
+    // kyc_tiers is the authoritative source for determining the customer's
+    // current verification tier. Use it instead of (or alongside) verifications
+    // because the tier names (l0/l1/l2) map directly to Stripe's tier model.
+    // Reference: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
+    const kycTiers = data.kyc_tiers ?? [];
+
     res.json({
       customerId: data.id,
       providedFields: data.provided_fields ?? [],
       kycStatus,
       idDocStatus,
+      kycTiers,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

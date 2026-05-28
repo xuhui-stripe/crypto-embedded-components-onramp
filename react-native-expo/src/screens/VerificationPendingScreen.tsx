@@ -30,7 +30,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
-import { getCryptoCustomer, createOnrampSession } from '../api/client';
+import { getCryptoCustomer, createOnrampSession, KycTierEntry } from '../api/client';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'VerificationPending'>;
@@ -52,6 +52,7 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
   const [status, setStatus] = useState<PollStatus>('polling');
   const [pollCount, setPollCount] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<string>('pending');
+  const [kycTiers, setKycTiers] = useState<KycTierEntry[]>([]);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
@@ -92,6 +93,7 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
           : result.data.kycStatus;
 
       setVerificationStatus(currentStatus);
+      setKycTiers(result.data.kycTiers ?? []);
       setPollCount(attempt + 1);
 
       if (currentStatus === 'verified') {
@@ -147,6 +149,13 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
         Alert.alert('Error', err.message);
       }
     }
+  };
+
+  const statusStyle = (s: string) => {
+    if (s === 'verified') return styles.statusVerified;
+    if (s === 'rejected') return styles.statusRejected;
+    if (s === 'pending') return styles.statusPending;
+    return styles.statusMuted;
   };
 
   const tierLabel = requiredVerification === 'id_document_verified' ? 'L2' : 'L1';
@@ -216,17 +225,33 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
         </Text>
 
         <View style={styles.statusCard}>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>Verification type</Text>
-            <Text style={styles.statusValue}>{verificationLabel}</Text>
-          </View>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>Status</Text>
-            <Text style={[styles.statusValue, styles.statusPending]}>
-              {verificationStatus}
-            </Text>
-          </View>
-          <View style={styles.statusRow}>
+          {kycTiers.length > 0 ? (
+            kycTiers.map((tier) => (
+              <View key={tier.tier}>
+                <View style={styles.statusRow}>
+                  <Text style={styles.statusLabel}>{tier.tier.toUpperCase()} status</Text>
+                  <Text style={[styles.statusValue, statusStyle(tier.verification_status)]}>
+                    {tier.verification_status}
+                  </Text>
+                </View>
+                {tier.verification_errors && tier.verification_errors.length > 0 && (
+                  <View style={styles.errorBlock}>
+                    {tier.verification_errors.map((err, i) => (
+                      <Text key={i} style={styles.errorText}>• {err}</Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            ))
+          ) : (
+            <View style={styles.statusRow}>
+              <Text style={styles.statusLabel}>Status</Text>
+              <Text style={[styles.statusValue, styles.statusPending]}>
+                {verificationStatus}
+              </Text>
+            </View>
+          )}
+          <View style={[styles.statusRow, { borderBottomWidth: 0 }]}>
             <Text style={styles.statusLabel}>Checks completed</Text>
             <Text style={styles.statusValue}>{pollCount}</Text>
           </View>
@@ -299,6 +324,11 @@ const styles = StyleSheet.create({
   statusLabel: { color: '#555', fontSize: 13 },
   statusValue: { color: '#888', fontSize: 13, fontWeight: '500' },
   statusPending: { color: '#f0a500' },
+  statusVerified: { color: '#22c55e' },
+  statusRejected: { color: '#ef4444' },
+  statusMuted: { color: '#555' },
+  errorBlock: { paddingBottom: 8, paddingLeft: 4 },
+  errorText: { color: '#ef4444', fontSize: 12, lineHeight: 18 },
 
   hint: { color: '#444', fontSize: 12, textAlign: 'center', lineHeight: 18 },
   hintMono: { fontFamily: 'monospace', color: '#555' },

@@ -35,7 +35,10 @@ import { useOnramp } from '../hooks/useOnramp';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
-import { createOnrampSession, getTransactionLimits, getCryptoCustomer } from '../api/client';
+import {
+  createOnrampSession, getTransactionLimits, getCryptoCustomer,
+  KycTierEntry, deriveCurrentTier,
+} from '../api/client';
 import { CURRENCIES_BY_NETWORK } from '../constants';
 import { useSettings } from '../context/SettingsContext';
 import { LOCAL_LIMITS, TransactionLimits } from '../kycLimits';
@@ -57,6 +60,10 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
   const [collectingMethod, setCollectingMethod] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
 
+  // KYC tier — fetched on mount, used to determine step-up path on error.
+  const [kycTiers, setKycTiers] = useState<KycTierEntry[]>([]);
+  const [loadingTiers, setLoadingTiers] = useState(true);
+
   // Transaction limits — loaded when the screen mounts.
   const [limits, setLimits] = useState<TransactionLimits | null>(null);
   const [loadingLimits, setLoadingLimits] = useState(true);
@@ -64,6 +71,19 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
 
   const { collectPaymentMethod, createCryptoPaymentToken } = useOnramp();
   const { settings } = useSettings();
+
+  // ---------------------------------------------------------------------------
+  // Load KYC tiers on mount
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    (async () => {
+      setLoadingTiers(true);
+      const result = await getCryptoCustomer(customerId, authToken);
+      if (result.success) setKycTiers(result.data.kycTiers ?? []);
+      setLoadingTiers(false);
+    })();
+  }, [customerId, authToken]);
 
   // ---------------------------------------------------------------------------
   // Load transaction limits on mount
@@ -213,23 +233,31 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
       return;
     }
 
+    // Fetch fresh customer data to get authoritative kyc_tiers.
+    const customerResult = await getCryptoCustomer(customerId, authToken);
+    const freshTiers = customerResult.success ? (customerResult.data.kycTiers ?? []) : kycTiers;
+    if (customerResult.success) setKycTiers(freshTiers);
+
+    const currentTier = deriveCurrentTier(freshTiers);
+
     if (errorCode === 'crypto_onramp_missing_minimum_identity_verification') {
-      Alert.alert(
-        'Identity Verification Required',
-        'Please complete basic identity verification (name and address) before making a purchase.',
-      );
+      navigation.navigate('KYCStepUp', {
+        customerId, authToken,
+        errorCode: 'crypto_onramp_missing_minimum_identity_verification',
+        currentTier: 'L0',
+        walletAddress, network, sourceAmount, sourceCurrency: 'usd',
+        destinationCurrency: destCurrency, paymentToken: cryptoPaymentToken, paymentLabel,
+      });
       return;
     }
 
-    const customerResult = await getCryptoCustomer(customerId, authToken);
-    const kycStatus = customerResult.success ? customerResult.data.kycStatus : 'not_started';
-    const idDocStatus = customerResult.success ? customerResult.data.idDocStatus : 'not_started';
-
     const needsDoc = errorCode === 'crypto_onramp_missing_document_verification';
 
-    // If the required verification is already in progress (submitted but not
-    // yet reviewed), skip collection and go straight to the pending screen.
-    if (needsDoc && idDocStatus === 'pending') {
+    // If the required verification is already in progress, skip collection and
+    // go straight to the pending screen.
+    const l2Entry = freshTiers.find(t => t.tier === 'l2');
+    const l1Entry = freshTiers.find(t => t.tier === 'l1');
+    if (needsDoc && l2Entry?.verification_status === 'pending') {
       navigation.navigate('VerificationPending', {
         customerId, authToken,
         requiredVerification: 'id_document_verified',
@@ -238,7 +266,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
       });
       return;
     }
-    if (!needsDoc && kycStatus === 'pending') {
+    if (!needsDoc && l1Entry?.verification_status === 'pending') {
       navigation.navigate('VerificationPending', {
         customerId, authToken,
         requiredVerification: 'kyc_verified',
@@ -251,7 +279,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
     navigation.navigate('KYCStepUp', {
       customerId, authToken,
       errorCode: errorCode as any,
-      kycStatus, idDocStatus,
+      currentTier,
       walletAddress, network, sourceAmount, sourceCurrency: 'usd',
       destinationCurrency: destCurrency, paymentToken: cryptoPaymentToken, paymentLabel,
     });
@@ -282,6 +310,41 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
         placeholder="10"
         placeholderTextColor="#555"
       />
+
+      {/* KYC tier status card
+          Shows the customer's current KYC tier and per-tier verification
+          status. The tier data is fetched on mount and also refreshed when
+          a session error occurs, so it always reflects the latest state.
+          The derived currentTier is passed to KYCStepUpScreen on error. */}
+      <View style={styles.tierCard}>
+        <View style={styles.tierCardHeader}>
+          <Text style={styles.tierCardTitle}>KYC Verification</Text>
+          {loadingTiers && <ActivityIndicator color="#635BFF" size="small" />}
+          {!loadingTiers && (
+            <Text style={styles.tierBadge}>
+              Current: {deriveCurrentTier(kycTiers)}
+            </Text>
+          )}
+        </View>
+        {!loadingTiers && (
+          <View style={styles.tierRows}>
+            {(['l0', 'l1', 'l2'] as const).map(tier => {
+              const entry = kycTiers.find(t => t.tier === tier);
+              const status = entry?.verification_status ?? 'not_started';
+              const statusColor =
+                status === 'verified' ? '#22c55e' :
+                status === 'pending' ? '#f0a500' :
+                status === 'rejected' ? '#ef4444' : '#444';
+              return (
+                <View key={tier} style={styles.tierRow}>
+                  <Text style={styles.tierLabel}>{tier.toUpperCase()}</Text>
+                  <Text style={[styles.tierStatus, { color: statusColor }]}>{status}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
 
       {/* Transaction limits display
           Shows the customer's remaining capacity from the selected source
@@ -404,6 +467,38 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   inputWarning: { borderColor: '#ff6b35' },
+
+  // KYC tier card
+  tierCard: {
+    backgroundColor: '#111',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#1e1e1e',
+  },
+  tierCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  tierCardTitle: { color: '#666', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  tierBadge: {
+    color: '#635BFF',
+    fontSize: 11,
+    fontWeight: '700',
+    backgroundColor: '#1a1a2e',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#635BFF',
+  },
+  tierRows: { gap: 4 },
+  tierRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
+  tierLabel: { color: '#555', fontSize: 13 },
+  tierStatus: { fontSize: 13, fontWeight: '500' },
 
   // Limits card
   limitsCard: {

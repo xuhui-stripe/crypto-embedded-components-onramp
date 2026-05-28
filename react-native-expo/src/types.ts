@@ -78,10 +78,12 @@ export type RootStackParamList = {
       | 'crypto_onramp_missing_minimum_identity_verification'
       | 'crypto_onramp_missing_identity_verification'
       | 'crypto_onramp_missing_document_verification';
-    /** kycStatus from getCryptoCustomer — used to determine the current tier. */
-    kycStatus: string;
-    /** idDocStatus from getCryptoCustomer — used to determine the current tier. */
-    idDocStatus: string;
+    /**
+     * Customer's current KYC tier, derived from kyc_tiers via deriveCurrentTier().
+     * Using kyc_tiers (not verifications) is authoritative — kyc_verified can
+     * be non-not_started for L0 users, making verifications unreliable.
+     */
+    currentTier: 'L0' | 'L1' | 'L2';
     // Original payment details — used to retry session creation after step-up.
     walletAddress: string;
     network: string;
