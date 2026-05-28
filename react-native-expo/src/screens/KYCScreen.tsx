@@ -20,7 +20,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, ScrollView,
+  Alert, ScrollView, Linking,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -104,6 +104,7 @@ export default function KYCScreen({ navigation, route }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Text style={styles.tierBadge}>{settings.kycTier}</Text>
       <Text style={styles.title}>Add your personal info</Text>
       <Text style={styles.subtitle}>
         {collectSensitiveFields
@@ -114,6 +115,20 @@ export default function KYCScreen({ navigation, route }: Props) {
       {/* Name — collected at every tier */}
       <Row label="First Name" value={form.firstName} onChange={set('firstName')} autoCapitalize="words" />
       <Row label="Last Name" value={form.lastName} onChange={set('lastName')} autoCapitalize="words" />
+
+      {/* Test mode hint */}
+      <View style={styles.testCard}>
+        <Text style={styles.testCardTitle}>Test mode</Text>
+        <Text style={styles.testCardBody}>
+          Use <Text style={styles.testCardCode}>Verified</Text> as the last name to pass L0 KYC in test mode.{' '}
+          <Text
+            style={styles.testCardLink}
+            onPress={() => Linking.openURL('https://docs.stripe.com/crypto/onramp/embedded-components-integration-guide?platform=react-native#test-values')}
+          >
+            See all test values →
+          </Text>
+        </Text>
+      </View>
 
       {/* SSN + DOB — L1 and L2 only */}
       {collectSensitiveFields && (
@@ -203,8 +218,40 @@ const s = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   content: { paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32 },
+  tierBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#635BFF',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    color: '#635BFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
   title: { fontSize: 26, fontWeight: '700', color: '#fff', marginBottom: 8 },
   subtitle: { fontSize: 14, color: '#888', marginBottom: 24 },
+  testCard: {
+    backgroundColor: '#141f14',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#1e3a1e',
+  },
+  testCardTitle: {
+    color: '#22c55e',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  testCardBody: { color: '#777', fontSize: 13, lineHeight: 18 },
+  testCardCode: { color: '#aaa', fontFamily: 'monospace', fontSize: 12 },
+  testCardLink: { color: '#635BFF' },
   section: { color: '#635BFF', fontSize: 14, fontWeight: '600', marginBottom: 12, marginTop: 8 },
   row3: { flexDirection: 'row', marginBottom: 16, marginHorizontal: -4 },
   button: {

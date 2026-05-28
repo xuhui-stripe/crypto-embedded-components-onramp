@@ -51,7 +51,16 @@ export type RootStackParamList = {
     dobMonth?: number;
     dobYear?: number;
   };
-  Wallet: { customerId: string; authToken: string };
+  Wallet: {
+    customerId: string;
+    authToken: string;
+    /**
+     * Passed from AddressScreen during initial KYC onboarding so WalletScreen
+     * knows which verification tier to wait for after the wallet is attached.
+     * Omitted when coming from other flows (e.g. wallet management).
+     */
+    kycTier?: 'L0' | 'L1' | 'L2';
+  };
   PaymentMethod: {
     customerId: string;
     authToken: string;
@@ -94,22 +103,51 @@ export type RootStackParamList = {
     paymentLabel: string;
   };
   /**
-   * Verification pending screen. Polls getCryptoCustomer until the required
-   * verification is no longer pending, then retries session creation.
+   * VerificationPendingScreen polls getCryptoCustomer() until the required
+   * verification leaves the `pending` state, then continues the user's flow.
+   *
+   * This screen is reused for two distinct flows:
+   *
+   *   Flow A — Initial KYC onboarding (destination = 'PaymentMethod')
+   *     Reached from WalletScreen after the user attaches a wallet.
+   *     AddressScreen → WalletScreen → VerificationPendingScreen → PaymentMethodScreen
+   *     Set `tier` and `requiredVerification` so the screen knows what to watch.
+   *     `walletAddress` and `network` are required to navigate to PaymentMethod.
+   *     Session payment params (sourceAmount, paymentToken, etc.) are NOT needed.
+   *
+   *   Flow B — Payment step-up (destination omitted)
+   *     Reached from KYCStepUpScreen after the user provides extra identity
+   *     info to unlock a higher transaction limit. Once verified, this screen
+   *     automatically creates the onramp session and sends the user to checkout.
+   *     All payment params are required so the session can be created.
+   *
+   * See VerificationPendingScreen.tsx for the full flow diagram.
    */
   VerificationPending: {
     customerId: string;
     authToken: string;
-    /** Which verification we are waiting for Stripe to complete. */
+    /** Which verification to watch. Determines which status field to poll. */
     requiredVerification: 'kyc_verified' | 'id_document_verified';
-    // Original payment details — used to create the session once verified.
-    walletAddress: string;
-    network: string;
-    sourceAmount: string;
-    sourceCurrency: string;
-    destinationCurrency: string;
-    paymentToken: string;
-    paymentLabel: string;
+    /**
+     * The customer's KYC tier (L0 / L1 / L2), used for the badge label.
+     * Flow A passes it from WalletScreen; Flow B derives it from requiredVerification.
+     */
+    tier?: 'L0' | 'L1' | 'L2';
+    /**
+     * Flow A only. Navigates to PaymentMethodScreen once verification passes.
+     * When omitted (Flow B), the screen creates an onramp session instead.
+     */
+    destination?: 'PaymentMethod';
+    // Required for both flows: walletAddress + network are needed to navigate
+    // to PaymentMethod (Flow A) or to create a session (Flow B).
+    walletAddress?: string;
+    network?: string;
+    // Flow B only — needed to create the onramp session.
+    sourceAmount?: string;
+    sourceCurrency?: string;
+    destinationCurrency?: string;
+    paymentToken?: string;
+    paymentLabel?: string;
   };
   Checkout: {
     customerId: string;

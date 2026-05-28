@@ -1,21 +1,61 @@
 /**
- * VerificationPendingScreen — waits for Stripe's async identity review to
- * complete before retrying onramp session creation.
+ * VerificationPendingScreen — polls Stripe until an async identity review
+ * resolves, then continues the user's flow.
  *
- * Both L1 (attachKycInfo) and L2 (verifyIdentity) verifications are processed
- * asynchronously by Stripe. Creating a session while verification is still
- * `pending` returns a 400 error, so we must poll until the status resolves.
+ * ─── Why this screen exists ────────────────────────────────────────────────
+ * Stripe processes KYC asynchronously. After your app calls attachKycInfo()
+ * or verifyIdentity(), the verification status stays `pending` for some time
+ * before moving to `verified` or `rejected`. Any attempt to create an onramp
+ * session while status is still `pending` returns a 400 error.
  *
- * Polling strategy:
- *   - Call getCryptoCustomer every POLL_INTERVAL_MS.
- *   - Stop when the required verification is no longer `pending`:
- *       verified → proceed to create session and navigate to Checkout.
- *       rejected → show error, allow the user to go back.
- *   - Stop after MAX_POLLS attempts and show a timeout message.
+ * This screen bridges that gap: it polls getCryptoCustomer() on a timer and
+ * advances the user as soon as the status resolves — or shows the failure
+ * details inline if the verification is rejected.
  *
- * Merchant integration note:
- *   Always poll before retrying session creation — never assume a verification
- *   is complete just because the SDK call returned without an error.
+ * ─── Two flows that share this screen ──────────────────────────────────────
+ *
+ * Flow A — Initial KYC onboarding (destination = 'PaymentMethod')
+ *   The user just completed KYC (AddressScreen) and attached a wallet
+ *   (WalletScreen). Before allowing them to enter payment details, we gate
+ *   on Stripe's async review of the KYC submission.
+ *
+ *   AddressScreen
+ *     → attachKycInfo()            ← L0 / L1: name + address (+ SSN for L1)
+ *     → verifyIdentity()           ← L2 only: document + selfie
+ *     → WalletScreen               ← attach wallet
+ *     → VerificationPendingScreen  ← wait here
+ *     → PaymentMethodScreen        ← proceed once verified
+ *
+ *   Route params: destination='PaymentMethod', tier, requiredVerification,
+ *                 walletAddress, network
+ *   On verified  → navigation.replace('PaymentMethod')
+ *   On rejected  → stay on screen; show which tier failed; prompt to go back
+ *
+ * Flow B — Payment step-up (destination omitted)
+ *   The user tried to start a purchase but Stripe returned a KYC error
+ *   because their current tier's limit was too low. KYCStepUpScreen collected
+ *   the extra identity info; now we wait for Stripe to review it before
+ *   retrying the session.
+ *
+ *   PaymentMethodScreen
+ *     → createOnrampSession() returns KYC error
+ *     → KYCStepUpScreen
+ *     → attachKycInfo() / verifyIdentity()
+ *     → VerificationPendingScreen  ← wait here
+ *     → CheckoutScreen             ← session created automatically on verified
+ *
+ *   Route params: destination omitted, all payment params required
+ *   On verified  → createOnrampSession() → navigation.replace('Checkout')
+ *   On rejected  → stay on screen; show which tier failed; prompt to go back
+ *
+ * ─── Polling strategy ───────────────────────────────────────────────────────
+ *   - Call getCryptoCustomer() every POLL_INTERVAL_MS.
+ *   - Derive the current tier via deriveCurrentTier(kycTiers).
+ *   - Stop when that tier's verification_status is no longer `pending`.
+ *   - Stop after MAX_POLLS attempts (≈ 2 minutes) and show a timeout message.
+ *
+ * Merchant note: always poll before retrying session creation — never assume
+ * a verification is complete just because the SDK call returned without error.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -30,7 +70,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
-import { getCryptoCustomer, createOnrampSession, KycTierEntry } from '../api/client';
+import { getCryptoCustomer, createOnrampSession, KycTierEntry, deriveCurrentTier } from '../api/client';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'VerificationPending'>;
@@ -38,20 +78,28 @@ type Props = {
 };
 
 const POLL_INTERVAL_MS = 3000;
-const MAX_POLLS = 40; // 2 minutes
+const MAX_POLLS = 40; // ~2 minutes
 
 type PollStatus = 'polling' | 'verified' | 'rejected' | 'timeout' | 'creating_session';
 
 export default function VerificationPendingScreen({ navigation, route }: Props) {
   const {
     customerId, authToken, requiredVerification,
-    walletAddress, network, sourceAmount, sourceCurrency,
-    destinationCurrency, paymentToken, paymentLabel,
+    // destination controls which flow we're in (see file header):
+    //   'PaymentMethod' → Flow A: initial onboarding, go to PaymentMethod on success
+    //   undefined       → Flow B: payment step-up, create session on success
+    destination,
+    // tier is the customer's KYC tier, used for the badge label.
+    // Flow A passes it explicitly from WalletScreen.
+    // Flow B omits it and the label is derived from requiredVerification.
+    tier,
+    walletAddress, network,
+    // Payment params — Flow B only (session creation).
+    sourceAmount, sourceCurrency, destinationCurrency, paymentToken, paymentLabel,
   } = route.params;
 
   const [status, setStatus] = useState<PollStatus>('polling');
   const [pollCount, setPollCount] = useState(0);
-  const [verificationStatus, setVerificationStatus] = useState<string>('pending');
   const [kycTiers, setKycTiers] = useState<KycTierEntry[]>([]);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -64,7 +112,6 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
     };
   }, []);
 
-  // Start polling on mount.
   useEffect(() => {
     poll(0);
   }, []);
@@ -82,27 +129,41 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
       if (!mountedRef.current) return;
 
       if (!result.success) {
-        // Transient error — keep polling.
+        // Transient network error — keep polling.
         scheduleNext(attempt);
         return;
       }
 
-      const currentStatus =
-        requiredVerification === 'id_document_verified'
-          ? result.data.idDocStatus
-          : result.data.kycStatus;
+      // Derive the customer's current KYC tier from the kycTiers array, then
+      // read that tier's verification_status. This is the correct approach:
+      // after the user submits KYC info, deriveCurrentTier returns the tier
+      // they just attempted (e.g. L1 after attachKycInfo, L2 after verifyIdentity),
+      // and we check whether Stripe has finished reviewing it.
+      const kycTiersData = result.data.kycTiers ?? [];
+      const currentTierKey = deriveCurrentTier(kycTiersData).toLowerCase() as 'l0' | 'l1' | 'l2';
+      const tierEntry = kycTiersData.find(k => k.tier === currentTierKey);
+      const currentStatus = tierEntry?.verification_status ?? 'pending';
 
-      setVerificationStatus(currentStatus);
-      setKycTiers(result.data.kycTiers ?? []);
+      setKycTiers(kycTiersData);
       setPollCount(attempt + 1);
 
       if (currentStatus === 'verified') {
         setStatus('verified');
-        await createSessionAndProceed();
+        if (destination === 'PaymentMethod') {
+          // Flow A: KYC onboarding verified — proceed to add a payment method.
+          navigation.replace('PaymentMethod', {
+            customerId, authToken,
+            walletAddress: walletAddress!,
+            network: network!,
+          });
+        } else {
+          // Flow B: Step-up verified — retry session creation and go to checkout.
+          await createSessionAndProceed();
+        }
       } else if (currentStatus === 'rejected') {
         setStatus('rejected');
       } else {
-        // still pending — keep polling
+        // Still pending — check again after the interval.
         scheduleNext(attempt);
       }
     } catch {
@@ -114,18 +175,20 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
     pollRef.current = setTimeout(() => poll(attempt + 1), POLL_INTERVAL_MS);
   };
 
+  // Flow B only: create the onramp session now that verification passed,
+  // then send the user straight to checkout.
   const createSessionAndProceed = async () => {
     setStatus('creating_session');
     try {
       const sessionResult = await createOnrampSession({
-        paymentToken,
-        walletAddress,
+        paymentToken: paymentToken!,
+        walletAddress: walletAddress!,
         customerId,
         authToken,
-        destinationNetwork: network,
-        sourceAmount: parseFloat(sourceAmount),
-        sourceCurrency,
-        destinationCurrency,
+        destinationNetwork: network!,
+        sourceAmount: parseFloat(sourceAmount!),
+        sourceCurrency: sourceCurrency!,
+        destinationCurrency: destinationCurrency!,
       });
 
       if (!mountedRef.current) return;
@@ -134,15 +197,17 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
         Alert.alert(
           'Session Error',
           sessionResult.error.message,
-          [{ text: 'Go Back', onPress: () => navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress, network }) }],
+          [{ text: 'Go Back', onPress: () => navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress: walletAddress!, network: network! }) }],
         );
         return;
       }
 
       navigation.replace('Checkout', {
-        customerId, authToken, walletAddress, network,
+        customerId, authToken,
+        walletAddress: walletAddress!, network: network!,
         sessionId: sessionResult.data.id,
-        sourceAmount, sourceCurrency, destinationCurrency, paymentLabel,
+        sourceAmount: sourceAmount!, sourceCurrency: sourceCurrency!,
+        destinationCurrency: destinationCurrency!, paymentLabel: paymentLabel!,
       });
     } catch (err: any) {
       if (mountedRef.current) {
@@ -158,111 +223,122 @@ export default function VerificationPendingScreen({ navigation, route }: Props) 
     return styles.statusMuted;
   };
 
-  const tierLabel = requiredVerification === 'id_document_verified' ? 'L2' : 'L1';
+  const tierLabel = tier ?? (requiredVerification === 'id_document_verified' ? 'L2' : 'L1');
   const verificationLabel =
     requiredVerification === 'id_document_verified'
       ? 'ID document & selfie'
       : 'SSN & date of birth';
 
-  // ---------------------------------------------------------------------------
-  // Render states
-  // ---------------------------------------------------------------------------
+  const isPolling = status === 'polling';
+  const isCreatingSession = status === 'creating_session';
+  const isActive = isPolling || isCreatingSession;
+  const isRejected = status === 'rejected';
+  const isTimeout = status === 'timeout';
 
-  if (status === 'rejected') {
-    return (
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <Text style={styles.iconText}>✗</Text>
-          <Text style={styles.title}>Verification Failed</Text>
-          <Text style={styles.subtitle}>
-            Your {verificationLabel} verification was not approved. Please
-            check the information you provided and try again.
-          </Text>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={() => navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress, network })}
-          >
-            <Text style={styles.buttonText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
+  const handleGoBack = () => {
+    if (destination === 'PaymentMethod') {
+      // Flow A: restart KYC from the beginning.
+      navigation.navigate('KYCPrimer', { customerId, authToken });
+    } else {
+      // Flow B: go back to payment method selection.
+      navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress: walletAddress!, network: network! });
+    }
+  };
 
-  if (status === 'timeout') {
-    return (
-      <View style={styles.container}>
-        <View style={styles.content}>
-          <Text style={styles.iconText}>⏱</Text>
-          <Text style={styles.title}>Taking Longer Than Expected</Text>
-          <Text style={styles.subtitle}>
-            Stripe's review is still in progress. You can try your purchase
-            again in a few minutes.
-          </Text>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={() => navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress, network })}
-          >
-            <Text style={styles.buttonText}>Return to Payment</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // polling or creating_session
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <ActivityIndicator color="#635BFF" size="large" style={{ marginBottom: 24 }} />
 
-        <Text style={styles.tierBadge}>Awaiting {tierLabel} verification</Text>
-        <Text style={styles.title}>Verification In Progress</Text>
+        {/* Icon / spinner */}
+        {isActive
+          ? <ActivityIndicator color="#635BFF" size="large" style={{ marginBottom: 24 }} />
+          : <Text style={[styles.iconText, isRejected ? styles.iconRejected : styles.iconTimeout]}>
+              {isRejected ? '✗' : '⏱'}
+            </Text>
+        }
+
+        {/* Tier badge */}
+        {isPolling && (
+          <Text style={styles.tierBadge}>Awaiting {tierLabel} verification</Text>
+        )}
+        {isCreatingSession && (
+          <Text style={styles.tierBadgeSuccess}>Verification Complete</Text>
+        )}
+
+        {/* Title */}
+        <Text style={styles.title}>
+          {isRejected ? 'Verification Failed'
+            : isTimeout ? 'Taking Longer Than Expected'
+            : isCreatingSession ? 'Creating Transaction'
+            : 'Verification In Progress'}
+        </Text>
+
+        {/* Subtitle */}
         <Text style={styles.subtitle}>
-          {status === 'creating_session'
-            ? 'Verification complete! Creating your transaction...'
+          {isRejected
+            ? 'One or more verifications were not approved. Please go back and re-enter your information.'
+            : isTimeout
+            ? "Stripe's review is still in progress. You can try again in a few minutes."
+            : isCreatingSession
+            ? 'Your identity was verified. Creating your onramp session now...'
             : `Stripe is reviewing your ${verificationLabel}. This usually takes a few seconds.`}
         </Text>
 
-        <View style={styles.statusCard}>
-          {kycTiers.length > 0 ? (
-            kycTiers.map((tier) => (
-              <View key={tier.tier}>
-                <View style={styles.statusRow}>
-                  <Text style={styles.statusLabel}>{tier.tier.toUpperCase()} status</Text>
-                  <Text style={[styles.statusValue, statusStyle(tier.verification_status)]}>
-                    {tier.verification_status}
-                  </Text>
-                </View>
-                {tier.verification_errors && tier.verification_errors.length > 0 && (
-                  <View style={styles.errorBlock}>
-                    {tier.verification_errors.map((err, i) => (
-                      <Text key={i} style={styles.errorText}>• {err}</Text>
-                    ))}
+        {/* Per-tier status card — shown while polling or after rejection */}
+        {!isTimeout && (
+          <View style={styles.statusCard}>
+            {kycTiers.length > 0 ? (
+              kycTiers.map((kycTier) => (
+                <View key={kycTier.tier}>
+                  <View style={styles.statusRow}>
+                    <Text style={styles.statusLabel}>{kycTier.tier.toUpperCase()} status</Text>
+                    <Text style={[styles.statusValue, statusStyle(kycTier.verification_status)]}>
+                      {kycTier.verification_status}
+                    </Text>
                   </View>
-                )}
+                  {kycTier.verification_errors && kycTier.verification_errors.length > 0 && (
+                    <View style={styles.errorBlock}>
+                      {kycTier.verification_errors.map((err, i) => (
+                        <Text key={i} style={styles.errorText}>• {err}</Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ))
+            ) : (
+              <View style={styles.statusRow}>
+                <Text style={styles.statusLabel}>Status</Text>
+                <Text style={[styles.statusValue, styles.statusPending]}>pending</Text>
               </View>
-            ))
-          ) : (
-            <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Status</Text>
-              <Text style={[styles.statusValue, styles.statusPending]}>
-                {verificationStatus}
-              </Text>
-            </View>
-          )}
-          <View style={[styles.statusRow, { borderBottomWidth: 0 }]}>
-            <Text style={styles.statusLabel}>Checks completed</Text>
-            <Text style={styles.statusValue}>{pollCount}</Text>
+            )}
+            {isActive && (
+              <View style={[styles.statusRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.statusLabel}>Checks completed</Text>
+                <Text style={styles.statusValue}>{pollCount}</Text>
+              </View>
+            )}
           </View>
-        </View>
+        )}
 
-        <Text style={styles.hint}>
-          Polling{' '}
-          <Text style={styles.hintMono}>getCryptoCustomer()</Text>
-          {' '}every {POLL_INTERVAL_MS / 1000}s until status is{' '}
-          <Text style={styles.hintMono}>verified</Text>
-        </Text>
+        {/* Polling hint */}
+        {isPolling && (
+          <Text style={styles.hint}>
+            Polling{' '}
+            <Text style={styles.hintMono}>getCryptoCustomer()</Text>
+            {' '}every {POLL_INTERVAL_MS / 1000}s until status is{' '}
+            <Text style={styles.hintMono}>verified</Text>
+          </Text>
+        )}
+
+        {/* Go back button — shown after rejection or timeout */}
+        {(isRejected || isTimeout) && (
+          <TouchableOpacity style={styles.button} onPress={handleGoBack}>
+            <Text style={styles.buttonText}>
+              {isTimeout ? 'Return to Payment' : 'Go Back & Re-enter'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
       </View>
     </View>
   );
@@ -277,6 +353,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 32, alignItems: 'center' },
 
   iconText: { fontSize: 48, marginBottom: 16 },
+  iconRejected: { color: '#ef4444' },
+  iconTimeout: { color: '#f0a500' },
 
   tierBadge: {
     backgroundColor: '#1a1a2e',
@@ -286,6 +364,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     color: '#635BFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 14,
+  },
+  tierBadgeSuccess: {
+    backgroundColor: '#0d2818',
+    borderWidth: 1,
+    borderColor: '#22c55e',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    color: '#22c55e',
     fontSize: 12,
     fontWeight: '700',
     marginBottom: 14,

@@ -24,7 +24,7 @@ type Props = {
 };
 
 export default function WalletScreen({ navigation, route }: Props) {
-  const { customerId, authToken } = route.params;
+  const { customerId, authToken, kycTier } = route.params;
   const [existingWallets, setExistingWallets] = useState<ExistingWallet[]>([]);
   const [loadingWallets, setLoadingWallets] = useState(true);
   const [selectedWallet, setSelectedWallet] = useState<ExistingWallet | null>(null);
@@ -47,14 +47,30 @@ export default function WalletScreen({ navigation, route }: Props) {
     })();
   }, [customerId, authToken]);
 
+  // After a wallet is attached, route through VerificationPendingScreen when
+  // coming from the initial KYC onboarding flow (kycTier is set). The pending
+  // screen polls until Stripe finishes reviewing the KYC submission, then
+  // proceeds to PaymentMethod. If kycTier is absent (e.g. wallet management
+  // flows), go directly to PaymentMethod as before.
+  const goToNextScreen = (walletAddress: string, walletNetwork: string) => {
+    if (kycTier) {
+      navigation.navigate('VerificationPending', {
+        customerId,
+        authToken,
+        requiredVerification: kycTier === 'L2' ? 'id_document_verified' : 'kyc_verified',
+        tier: kycTier,
+        destination: 'PaymentMethod',
+        walletAddress,
+        network: walletNetwork,
+      });
+    } else {
+      navigation.navigate('PaymentMethod', { customerId, authToken, walletAddress, network: walletNetwork });
+    }
+  };
+
   const handleUseExisting = () => {
     if (!selectedWallet) return;
-    navigation.navigate('PaymentMethod', {
-      customerId,
-      authToken,
-      walletAddress: selectedWallet.wallet_address,
-      network: selectedWallet.network,
-    });
+    goToNextScreen(selectedWallet.wallet_address, selectedWallet.network);
   };
 
   const handleRegister = async () => {
@@ -69,12 +85,7 @@ export default function WalletScreen({ navigation, route }: Props) {
         Alert.alert('Error', result.error.message);
         return;
       }
-      navigation.navigate('PaymentMethod', {
-        customerId,
-        authToken,
-        walletAddress: address.trim(),
-        network,
-      });
+      goToNextScreen(address.trim(), network);
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
