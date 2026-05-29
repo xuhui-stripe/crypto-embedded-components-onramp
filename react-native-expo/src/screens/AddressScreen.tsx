@@ -1,3 +1,18 @@
+/**
+ * AddressScreen — collect the customer's home address and submit KYC data.
+ *
+ * Recommended operations at this step:
+ *   - Collect home address (line1, city, state, postalCode).
+ *   - Call attachKycInfo({ firstName, lastName, address }) for L0.
+ *     L1/L2: also include idNumber and dateOfBirth collected in KYCScreen.
+ *   - L2 only: call verifyIdentity() after attachKycInfo to capture a
+ *     government-issued ID document and selfie via Stripe's built-in UI.
+ *
+ * attachKycInfo() merges with any data already on file — only send the fields
+ * collected in this onboarding flow (do not re-send fields from prior sessions).
+ *
+ * Next screen: WalletScreen
+ */
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -88,8 +103,9 @@ export default function AddressScreen({ navigation, route }: Props) {
         }
       }
 
-      // Proceed to wallet attachment. kycTier is forwarded so WalletScreen
-      // can route through VerificationPendingScreen after the wallet is attached.
+      // Proceed to wallet attachment. PaymentMethodScreen (reached after the
+      // wallet is registered) will poll getCryptoCustomer() to confirm the
+      // initial KYC submission is verified before allowing a purchase.
       navigation.navigate('Wallet', { customerId, authToken });
     } catch (err: any) {
       Alert.alert('Error', err.message);

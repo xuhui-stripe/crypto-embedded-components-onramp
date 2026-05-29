@@ -1,45 +1,51 @@
 /**
  * KYCStepUpScreen — collect only the incremental identity information needed
- * to satisfy the Stripe error returned when creating an onramp session.
+ * to upgrade to the next KYC tier.
  *
- * Five paths, driven by the error code and the customer's current KYC tier:
+ * This screen is reached from PaymentMethodScreen when the user's requested
+ * amount exceeds their current tier's transaction limit. It collects only the
+ * fields not yet on file — attachKycInfo() merges with existing data, so only
+ * the NEW fields for the target tier need to be sent.
+ *
+ * Four paths, driven by errorCode and currentTier:
  *
  *   missing_minimum_identity_verification (any tier)
  *     → Collect: first name, last name, home address
  *     → SDK call: attachKycInfo({ firstName, lastName, address })
- *     → Navigate to: VerificationPending (kyc_verified)
+ *     → Navigate to: PaymentMethodScreen (polls until L0 verified)
  *
  *   missing_identity_verification + currentTier=L0
- *     → L0 already provided: name + address
- *     → Collect: SSN + date of birth only (incremental)
+ *     → L0 already has: name + address
+ *     → Collect: SSN + date of birth only (incremental L0→L1 step-up)
  *     → SDK call: attachKycInfo({ idNumber, dateOfBirth })
- *     → Navigate to: VerificationPending (kyc_verified)
+ *     → Navigate to: PaymentMethodScreen (polls until L1 verified)
  *
  *   missing_identity_verification + currentTier=L1
- *     → L1 verification was rejected — re-collect everything
+ *     → L1 verification was rejected — re-collect all L1 fields
  *     → Collect: first name, last name, home address, SSN, date of birth
  *     → SDK call: attachKycInfo({ firstName, lastName, address, idNumber, dateOfBirth })
- *     → Navigate to: VerificationPending (kyc_verified)
+ *     → Navigate to: PaymentMethodScreen (polls until L1 verified)
  *
  *   missing_document_verification + currentTier=L0
- *     → L0 already provided: name + address
- *     → Collect: SSN + date of birth, then launch verifyIdentity()
+ *     → L0 already has: name + address
+ *     → Collect: SSN + date of birth, then capture document + selfie
  *     → SDK calls: attachKycInfo({ idNumber, dateOfBirth }) → verifyIdentity()
- *     → Navigate to: VerificationPending (id_document_verified)
+ *     → Navigate to: PaymentMethodScreen (polls until L2 verified)
  *
  *   missing_document_verification + currentTier=L1 or L2
- *     → L1/L2 already provided name + address + SSN + DOB
+ *     → L1/L2 already has: name + address + SSN + DOB
+ *     → Capture document + selfie only (incremental L1→L2 step-up)
  *     → SDK call: verifyIdentity()
- *     → Navigate to: VerificationPending (id_document_verified)
+ *     → Navigate to: PaymentMethodScreen (polls until L2 verified)
  *
- * Merchant integration notes:
- *   - attachKycInfo() merges with existing data — only send the NEW fields.
- *   - verifyIdentity() launches Stripe's built-in document-capture UI.
- *   - Always navigate to VerificationPending after SDK calls — Stripe's
- *     identity review is asynchronous even in test mode.
+ * After navigation, PaymentMethodScreen fetches fresh kycTiers, detects the
+ * pending status, and polls getCryptoCustomer() until the review resolves.
+ * Once verified, it re-checks limits for the new tier and either prompts for
+ * another step-up (if amount still exceeds the new limit) or proceeds to
+ * createOnrampSession(). Stripe's identity review is asynchronous — always
+ * return to PaymentMethodScreen and let it poll rather than proceeding directly.
  *
  * See: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
- *      #interpret-limit-errors-from-cryptoonrampsession
  */
 
 import React, { useState } from 'react';

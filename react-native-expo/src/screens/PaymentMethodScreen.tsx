@@ -1,42 +1,108 @@
 /**
  * PaymentMethodScreen — select amount, destination currency, and payment card.
  *
- * ─── KYC step-up integration ────────────────────────────────────────────────
- * Stripe sets per-transaction limits based on the customer's KYC tier. If the
- * requested amount exceeds the customer's current limit, asking them to complete
- * additional identity verification unlocks a higher limit.
+ * This screen is the hub of the progressive KYC demonstration. It sits at the
+ * intersection of KYC verification status, transaction limits, and session
+ * creation, and orchestrates the step-up loop when the user needs a higher tier.
  *
- * This screen uses a proactive limit check (not reactive session error codes):
+ * ─── Recommended screen order and per-screen operations ─────────────────────
  *
- *   1. On mount, fetch the customer's live transaction limits from the Stripe
- *      API (GET /v1/crypto/onramp_transaction_limits) or from the local config
- *      (src/kycLimits.ts), controlled by Settings → Limit Source.
+ *  1. AuthScreen / RegisterScreen
+ *       Operation : Link sign-in or account creation
+ *       Produces  : customerId, authToken
+ *       Next      : KYCPrimerScreen
  *
- *   2. Compare the entered amount against the limit in real time.
+ *  2. KYCPrimerScreen
+ *       Operation : Show what information will be collected (consent screen)
+ *       API calls : none
+ *       Next      : KYCScreen
  *
- *   3. When the amount exceeds the limit:
- *        - Highlight the limit card and show a warning.
- *        - Change the primary button from "Review Purchase" to
- *          "Collect More KYC Data".
- *        - Tapping that button calls handleStepUp(), which:
- *            a. Fetches fresh kyc_tiers to determine the customer's current tier.
- *            b. Maps current tier → next tier's required verification:
- *                 L0 (name+address only) → collect SSN+DOB  (L1 step-up)
- *                 L1 (SSN+DOB done)      → capture ID doc   (L2 step-up)
- *            c. If the next tier's verification is already pending (submitted
- *               but awaiting Stripe's review), skips collection and goes
- *               straight to VerificationPendingScreen.
- *            d. Otherwise navigates to KYCStepUpScreen for data collection.
+ *  3. KYCScreen
+ *       Operation : Collect first name, last name
+ *                   L1/L2: also collect SSN and date of birth
+ *       API calls : none (data is held in navigation params)
+ *       Next      : AddressScreen
  *
- *   4. When the amount is within the limit, proceed normally:
- *        → createOnrampSession() → CheckoutScreen
+ *  4. AddressScreen
+ *       Operation : Collect home address
+ *       API calls : attachKycInfo({ firstName, lastName, address [, idNumber, dob] })
+ *                   L2 only: verifyIdentity() — captures government ID + selfie
+ *       Next      : WalletScreen
  *
- * Merchant integration note:
- *   Calling getTransactionLimits() before showing the checkout flow lets users
- *   see their remaining capacity early and voluntarily complete step-up KYC
- *   rather than encountering a hard block during checkout.
+ *  5. WalletScreen
+ *       Operation : Select or register the destination crypto wallet
+ *       API calls : getCustomerWallets() to list saved wallets
+ *                   registerWalletAddress() when adding a new wallet
+ *       Next      : PaymentMethodScreen (this screen)
  *
- *   See: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
+ *  6. PaymentMethodScreen  ◄── you are here
+ *       Operation : Select amount, destination currency, and payment card
+ *       API calls : getCryptoCustomer()         — fetch kycTiers; poll if pending
+ *                   getTransactionLimits()       — get limit for verified tier
+ *                   collectPaymentMethod()       — Stripe UI to pick/add a card
+ *                   createCryptoPaymentToken()   — tokenise the selected card
+ *       Decision  :
+ *         • Verification pending   → poll getCryptoCustomer() every 3 s (button disabled)
+ *         • Verification rejected  → "Re-enter KYC Data" → back to KYC screen
+ *         • Amount within limit    → createOnrampSession() → CheckoutScreen
+ *         • Amount exceeds limit   → "Collect More KYC Data" → step-up loop ↓
+ *
+ * ─── Step-up loop (repeats until amount fits within the verified tier's limit) ──
+ *
+ *  7. KYCStepUpScreen
+ *       Operation : Collect only the incremental fields needed for the next tier
+ *                   L0 → L1: attachKycInfo({ idNumber, dateOfBirth })
+ *                   L1 → L2: verifyIdentity()
+ *       API calls : attachKycInfo() and/or verifyIdentity()
+ *       Next      : PaymentMethodScreen (with payment params pre-filled)
+ *                   PaymentMethodScreen fetches fresh kycTiers, detects 'pending',
+ *                   and polls until the new tier resolves.
+ *
+ *  8. PaymentMethodScreen (same screen, new instance)
+ *       Operation : Re-check limits for the newly verified tier
+ *       API calls : getCryptoCustomer() (poll), getTransactionLimits()
+ *       Decision  :
+ *         • Amount still exceeds new tier's limit → go to step 7 again (L1→L2)
+ *         • Amount now within limit → createOnrampSession() → CheckoutScreen
+ *
+ * ─── Checkout ────────────────────────────────────────────────────────────────
+ *
+ *  9. CheckoutScreen
+ *       Operation : Display quote and fees; user confirms
+ *       API calls : refreshQuote(), checkoutSession() (server-side for client_secret)
+ *                   performCheckout() — Stripe SDK completes the transaction
+ *       Next      : SuccessScreen
+ *
+ * 10. SuccessScreen
+ *       Operation : Show confirmation
+ *       Options   : "New Purchase" → back to PaymentMethodScreen (skips auth + KYC)
+ *                   "Start Over"   → back to HomeScreen
+ *
+ * ─── Starting tier ───────────────────────────────────────────────────────────
+ *
+ * The demo Settings screen lets you choose the starting KYC tier:
+ *
+ *   L0 : Initial collection = name + address only.
+ *        Step-up to L1 (SSN+DOB) and L2 (ID doc) triggered from this screen.
+ *
+ *   L1 : Initial collection = name + address + SSN + DOB.
+ *        Step-up to L2 (ID doc) triggered from this screen if needed.
+ *
+ *   L2 : Initial collection = name + address + SSN + DOB + ID doc + selfie.
+ *        No further step-up available; highest limit applies from the start.
+ *
+ * ─── Proactive limit check ───────────────────────────────────────────────────
+ *
+ * This screen uses a proactive limit check rather than attempting session
+ * creation and reacting to KYC error codes. Proactive checking is recommended
+ * because it lets the user see their remaining capacity before entering payment
+ * details, and avoids creating a session that immediately fails.
+ *
+ *   getTransactionLimits() params: wallet_address, destination_network
+ *   Response: limits in cents — divide by 100 for dollar comparison
+ *   Alternative: src/kycLimits.ts provides hardcoded tiers for offline testing
+ *
+ * See: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
  */
 
 import React, { useState, useEffect, useRef } from 'react';

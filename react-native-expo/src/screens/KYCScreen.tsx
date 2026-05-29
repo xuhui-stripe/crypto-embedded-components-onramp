@@ -1,16 +1,23 @@
 /**
  * KYCScreen — collect personal identity fields based on the configured KYC tier.
  *
- *   L0: First name + last name only. No SSN, no date of birth.
- *       The user proceeds to AddressScreen which calls attachKycInfo with
- *       just name + address. They will be prompted to provide SSN/DOB later
- *       if they attempt a purchase above the L0 transaction limit.
+ * Recommended operations at this step:
+ *   - Collect first name and last name (all tiers).
+ *   - L1/L2: also collect SSN and date of birth.
+ *   - No API calls are made here; all fields are forwarded to AddressScreen
+ *     which bundles them into a single attachKycInfo() call.
  *
- *   L1: First name + last name + SSN + date of birth.
- *       AddressScreen calls attachKycInfo with the full set of fields.
+ * Tier behaviour:
+ *   L0: name only. AddressScreen calls attachKycInfo({ name, address }).
+ *       If the user later attempts a purchase above the L0 limit, PaymentMethod
+ *       triggers a step-up (KYCStepUpScreen) to collect SSN + DOB.
  *
- *   L2: Same fields as L1. AddressScreen additionally calls verifyIdentity()
+ *   L1: name + SSN + DOB. AddressScreen calls attachKycInfo with all fields.
+ *
+ *   L2: same fields as L1. AddressScreen additionally calls verifyIdentity()
  *       to capture a government-issued ID document and selfie.
+ *
+ * Next screen: AddressScreen
  *
  * Merchant note: the tier selection is purely for demo purposes. In a real
  * integration you determine which fields to collect based on your compliance

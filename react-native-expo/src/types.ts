@@ -72,16 +72,18 @@ export type RootStackParamList = {
     destinationCurrency?: string;
   };
   /**
-   * KYC step-up screen. Shown when session creation returns a KYC error.
-   * Collects only the incremental fields the user hasn't yet provided, based
-   * on the Stripe error code and their current verification status:
+   * KYC step-up screen. Reached from PaymentMethodScreen when the entered
+   * amount exceeds the current tier's transaction limit. Collects only the
+   * incremental fields needed for the next tier:
    *
    *   missing_identity_verification  + currentTier=L0 → collect SSN + DOB → attachKycInfo
    *   missing_document_verification  + currentTier=L0 → collect SSN + DOB → attachKycInfo → verifyIdentity
    *   missing_document_verification  + currentTier=L1 → verifyIdentity only
    *
-   * After the SDK calls succeed, navigates to VerificationPending to wait
-   * for Stripe's async review before retrying the session.
+   * After SDK calls succeed, navigates back to PaymentMethodScreen with the
+   * original payment params pre-filled. PaymentMethodScreen polls until the
+   * new tier is verified, then re-checks limits and either steps up again or
+   * proceeds to createOnrampSession().
    */
   KYCStepUp: {
     customerId: string;
@@ -97,7 +99,8 @@ export type RootStackParamList = {
      * be non-not_started for L0 users, making verifications unreliable.
      */
     currentTier: 'L0' | 'L1' | 'L2';
-    // Original payment details — used to retry session creation after step-up.
+    // Payment details carried forward so PaymentMethodScreen can pre-fill
+    // amount, currency, and card after returning from the step-up flow.
     walletAddress: string;
     network: string;
     sourceAmount: string;

@@ -1,3 +1,13 @@
+/**
+ * KYCPrimerScreen — consent and overview screen shown before identity collection.
+ *
+ * Recommended operations at this step:
+ *   - Display what information will be collected (varies by KYC tier).
+ *   - Explain that the data is handled by Link / Stripe, not the merchant.
+ *   - No API calls are made here.
+ *
+ * Next screen: KYCScreen (collects name; L1/L2 also collect SSN + date of birth)
+ */
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import { MERCHANT_DISPLAY_NAME } from '../constants';
