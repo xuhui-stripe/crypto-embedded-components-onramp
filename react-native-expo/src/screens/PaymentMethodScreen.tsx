@@ -174,7 +174,9 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
             const cardLimits = result.data.limits?.['usd.fiat']?.card ?? [];
             const instantEntry =
               cardLimits.find(l => l.settlement_speed === 'instant') ?? cardLimits[0];
-            setLimits({ limit: instantEntry?.limit ?? 0 });
+            // API returns the limit in cents — convert to dollars for display
+            // and comparison against the user-entered amount (which is in dollars).
+            setLimits({ limit: (instantEntry?.limit ?? 0) / 100 });
           } else {
             setLimitsError('Could not fetch limits from API');
           }
