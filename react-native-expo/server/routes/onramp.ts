@@ -97,6 +97,55 @@ router.get('/crypto_customer/:customerId/payment_tokens', async (req: Request, r
   }
 });
 
+// Fetch the customer's current transaction limits.
+//
+// Stripe API: GET https://api.stripe.com/v1/crypto/onramp_transaction_limits
+//
+// Optional query params forwarded to Stripe:
+//   wallet_address, destination_network, customer_ip_address
+//
+// Response shape (actual Stripe API):
+//   {
+//     object: "crypto.onramp_transaction_limits",
+//     crypto_customer_id: "crc_...",
+//     limits: {
+//       "usd.fiat": {
+//         card: [{ limit: 3000, settlement_speed: "instant" }],
+//         us_bank_account: [{ limit: 5000, settlement_speed: "standard" }, ...]
+//       }
+//     }
+//   }
+//
+// The `limit` fields are per-transaction maximums based on the customer's KYC
+// tier. Higher tiers (more verification) yield higher limits.
+router.get('/crypto/onramp_transaction_limits', async (req: Request, res: Response) => {
+  try {
+    const user = db.getUserFromRequest(req);
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const record = db.getRecord(user.email);
+    if (!record) return res.status(404).json({ error: 'User not found' });
+
+    const qs = new URLSearchParams();
+    const { wallet_address, destination_network, customer_ip_address } = req.query as Record<string, string>;
+    if (wallet_address) qs.append('wallet_address', wallet_address);
+    if (destination_network) qs.append('destination_network', destination_network);
+    // Fall back to a default IP if none provided — required for limit resolution.
+    qs.append('customer_ip_address', customer_ip_address ?? '127.0.0.1');
+
+    const { response, data } = await stripeCallWithRetry('/crypto/onramp_transaction_limits', qs, record, 'GET');
+
+    if (!response.ok) {
+      console.error('[stripe] get onramp_transaction_limits failed:', JSON.stringify(data.error ?? data));
+      return res.status(response.status).json({ error: toUserError(data) });
+    }
+
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Create a crypto onramp session
 // Stripe API: POST https://api.stripe.com/v1/crypto/onramp_sessions
 router.post('/create_onramp_session', async (req: Request, res: Response) => {
@@ -131,7 +180,10 @@ router.post('/create_onramp_session', async (req: Request, res: Response) => {
 
     if (!response.ok) {
       console.error('[stripe] create_onramp_session failed:', JSON.stringify(data.error ?? data));
-      return res.status(response.status).json({ error: toUserError(data) });
+      return res.status(response.status).json({
+        error: toUserError(data),
+        code: data?.error?.code ?? 'ERROR_CODE_UNKNOWN',
+      });
     }
 
     console.log(`[onramp] created session ${data.id}`);
