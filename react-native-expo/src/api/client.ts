@@ -54,12 +54,12 @@ export interface CryptoCustomerResponse {
  *
  * Reference: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
  */
-export function deriveCurrentTier(kycTiers: KycTierEntry[]): 'L0' | 'L1' | 'L2' {
+export function deriveCurrentTier(kycTiers: KycTierEntry[]): 'l0' | 'l1' | 'l2' {
   const attempted = ['pending', 'rejected', 'verified'];
   const find = (t: string) => kycTiers.find(k => k.tier === t)?.verification_status ?? 'not_started';
-  if (attempted.includes(find('l2'))) return 'L2';
-  if (attempted.includes(find('l1'))) return 'L1';
-  return 'L0';
+  if (attempted.includes(find('l2'))) return 'l2';
+  if (attempted.includes(find('l1'))) return 'l1';
+  return 'l0';
 }
 
 export interface WalletInfo {
