@@ -58,6 +58,39 @@ export type RootStackParamList = {
     walletAddress: string;
     network: string;
   };
+  /**
+   * KYC step-up screen. Shown when session creation returns a KYC error.
+   * Collects only the incremental fields the user hasn't yet provided, based
+   * on the Stripe error code and their current verification status:
+   *
+   *   missing_identity_verification  + currentTier=L0 → collect SSN + DOB → attachKycInfo
+   *   missing_document_verification  + currentTier=L0 → collect SSN + DOB → attachKycInfo → verifyIdentity
+   *   missing_document_verification  + currentTier=L1 → verifyIdentity only
+   *
+   * After the SDK calls succeed, navigates back (goBack) to allow the user to
+   * retry the session.
+   */
+  KYCStepUp: {
+    customerId: string;
+    authToken: string;
+    /** Stripe error code from the failed session creation. */
+    errorCode:
+      | 'crypto_onramp_missing_minimum_identity_verification'
+      | 'crypto_onramp_missing_identity_verification'
+      | 'crypto_onramp_missing_document_verification';
+    /** kycStatus from getCryptoCustomer — used to determine the current tier. */
+    kycStatus: string;
+    /** idDocStatus from getCryptoCustomer — used to determine the current tier. */
+    idDocStatus: string;
+    // Original payment details — used to retry session creation after step-up.
+    walletAddress: string;
+    network: string;
+    sourceAmount: string;
+    sourceCurrency: string;
+    destinationCurrency: string;
+    paymentToken: string;
+    paymentLabel: string;
+  };
   Checkout: {
     customerId: string;
     authToken: string;
