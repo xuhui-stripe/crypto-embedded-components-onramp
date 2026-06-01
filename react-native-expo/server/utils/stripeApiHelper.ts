@@ -19,7 +19,9 @@ export async function stripeCallWithRefresh(
   method: string = 'POST',
 ): Promise<{ response: Response; data: any }> {
   const secretKey = STRIPE_SECRET_KEY!;
-  const body = method === 'GET' ? undefined : bodyParams;
+  const isGet = method === 'GET';
+  const body = isGet ? undefined : bodyParams;
+  const queryString = isGet && bodyParams.toString() ? `?${bodyParams.toString()}` : '';
 
   const makeRequest = (oauthToken: string | null) => {
     const headers: Record<string, string> = {
@@ -28,7 +30,7 @@ export async function stripeCallWithRefresh(
       'Content-Type': 'application/x-www-form-urlencoded',
     };
     if (oauthToken) headers['Stripe-OAuth-Token'] = oauthToken;
-    return fetch(`${STRIPE_API}${path}`, { method, headers, body: body?.toString() });
+    return fetch(`${STRIPE_API}${path}${queryString}`, { method, headers, body: body?.toString() });
   };
 
   let response = await makeRequest(record.accessToken);

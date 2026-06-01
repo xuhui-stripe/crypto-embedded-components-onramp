@@ -30,11 +30,17 @@ router.get('/crypto_customer/:customerId', async (req: Request, res: Response) =
     const kycStatus = verifications.find((v: any) => v.name === 'kyc_verified')?.status ?? 'not_started';
     const idDocStatus = verifications.find((v: any) => v.name === 'id_document_verified')?.status ?? 'not_started';
 
+    // kyc_tiers is the authoritative source for determining the customer's
+    // current verification tier.
+    // Reference: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
+    const kycTiers = data.kyc_tiers ?? [];
+
     res.json({
       customerId: data.id,
       providedFields: data.provided_fields ?? [],
       kycStatus,
       idDocStatus,
+      kycTiers,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -126,19 +132,14 @@ router.get('/crypto/onramp_transaction_limits', async (req: Request, res: Respon
     const record = db.getRecord(user.email);
     if (!record) return res.status(404).json({ error: 'User not found' });
 
-    // Build query string from optional params forwarded by the client.
-    // stripeCallWithRetry uses fetch with no body for GET requests, so query
-    // params must be appended directly to the path.
     const qs = new URLSearchParams();
     const { wallet_address, destination_network, customer_ip_address } = req.query as Record<string, string>;
     if (wallet_address) qs.append('wallet_address', wallet_address);
     if (destination_network) qs.append('destination_network', destination_network);
-    if (customer_ip_address) qs.append('customer_ip_address', customer_ip_address);
     // Fall back to a default IP if none provided — required for limit resolution.
-    if (!customer_ip_address) qs.append('customer_ip_address', '127.0.0.1');
+    qs.append('customer_ip_address', customer_ip_address ?? '127.0.0.1');
 
-    const path = `/crypto/onramp_transaction_limits?${qs.toString()}`;
-    const { response, data } = await stripeCallWithRetry(path, new URLSearchParams(), record, 'GET');
+    const { response, data } = await stripeCallWithRetry('/crypto/onramp_transaction_limits', qs, record, 'GET');
 
     if (!response.ok) {
       console.error('[stripe] get onramp_transaction_limits failed:', JSON.stringify(data.error ?? data));
