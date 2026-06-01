@@ -4,22 +4,40 @@ import { MERCHANT_DISPLAY_NAME } from '../constants';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
-
+import { useSettings } from '../context/SettingsContext';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'KYCPrimer'>;
   route: RouteProp<RootStackParamList, 'KYCPrimer'>;
 };
 
-const REQUIREMENTS = [
-  'Full name',
-  'Date of birth',
-  'Social Security Number',
-  'Home address',
-];
+// What each tier requires the user to provide.
+const REQUIREMENTS_BY_TIER = {
+  L0: [
+    'Full name',
+    'Home address',
+  ],
+  L1: [
+    'Full name',
+    'Social Security Number',
+    'Date of birth',
+    'Home address',
+  ],
+  L2: [
+    'Full name',
+    'Social Security Number',
+    'Date of birth',
+    'Home address',
+    'Government-issued photo ID',
+    'Selfie',
+  ],
+};
 
 export default function KYCPrimerScreen({ navigation, route }: Props) {
   const { customerId, authToken } = route.params;
+  const { settings } = useSettings();
+
+  const requirements = REQUIREMENTS_BY_TIER[settings.kycTier];
 
   return (
     <View style={styles.container}>
@@ -40,12 +58,22 @@ export default function KYCPrimerScreen({ navigation, route }: Props) {
       </Text>
 
       <Text style={styles.requiredLabel}>{"What's required:"}</Text>
-      {REQUIREMENTS.map((item) => (
+      {requirements.map(item => (
         <View key={item} style={styles.bulletRow}>
           <Text style={styles.bullet}>•</Text>
           <Text style={styles.bulletText}>{item}</Text>
         </View>
       ))}
+
+      {/* L2 note about the identity-document step */}
+      {settings.kycTier === 'L2' && (
+        <View style={styles.noteBanner}>
+          <Text style={styles.noteText}>
+            The ID and selfie are captured via Stripe's built-in secure
+            verification flow at the end of setup.
+          </Text>
+        </View>
+      )}
 
       <View style={styles.securityBanner}>
         <Text style={styles.lockIcon}>🔒</Text>
@@ -74,41 +102,27 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingBottom: 32,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 12,
-  },
-  description: {
-    fontSize: 14,
-    color: '#999',
-    lineHeight: 20,
-    marginBottom: 28,
-  },
-  link: {
-    color: '#635BFF',
-  },
-  requiredLabel: {
-    fontSize: 15,
-    color: '#fff',
-    marginBottom: 12,
-  },
+  title: { fontSize: 26, fontWeight: '700', color: '#fff', marginBottom: 12 },
+  description: { fontSize: 14, color: '#999', lineHeight: 20, marginBottom: 28 },
+  link: { color: '#635BFF' },
+  requiredLabel: { fontSize: 15, color: '#fff', marginBottom: 12 },
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
     paddingLeft: 4,
   },
-  bullet: {
-    color: '#fff',
-    fontSize: 16,
-    marginRight: 10,
+  bullet: { color: '#fff', fontSize: 16, marginRight: 10 },
+  bulletText: { color: '#fff', fontSize: 15 },
+  noteBanner: {
+    backgroundColor: '#1a1a2a',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
   },
-  bulletText: {
-    color: '#fff',
-    fontSize: 15,
-  },
+  noteText: { color: '#888', fontSize: 13, lineHeight: 18 },
   securityBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -116,17 +130,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    marginTop: 28,
+    marginTop: 20,
   },
-  lockIcon: {
-    fontSize: 16,
-    marginRight: 10,
-  },
-  securityText: {
-    color: '#999',
-    fontSize: 13,
-    flex: 1,
-  },
+  lockIcon: { fontSize: 16, marginRight: 10 },
+  securityText: { color: '#999', fontSize: 13, flex: 1 },
   spacer: { flex: 1 },
   button: {
     backgroundColor: '#635BFF',
@@ -134,9 +141,5 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

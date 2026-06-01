@@ -33,6 +33,8 @@ export interface PaymentToken {
 
 export type RootStackParamList = {
   Home: undefined;
+  /** Demo configuration: KYC tier and limit source. */
+  Settings: undefined;
   Auth: undefined;
   Register: { email: string; authToken: string };
   KYCPrimer: { customerId: string; authToken: string };
@@ -42,10 +44,12 @@ export type RootStackParamList = {
     authToken: string;
     firstName: string;
     lastName: string;
-    idNumber: string;
-    dobDay: number;
-    dobMonth: number;
-    dobYear: number;
+    /** Present for L1/L2 only — L0 skips SSN collection. */
+    idNumber?: string;
+    /** Present for L1/L2 only — L0 skips DOB collection. */
+    dobDay?: number;
+    dobMonth?: number;
+    dobYear?: number;
   };
   Wallet: { customerId: string; authToken: string };
   PaymentMethod: {
