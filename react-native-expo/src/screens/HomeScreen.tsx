@@ -11,8 +11,24 @@ type Props = {
 export default function HomeScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
+      {/*
+       * Settings button — top-right corner.
+       * Navigates to the demo settings screen where developers can configure
+       * the KYC tier (L0 / L1 / L2) and the transaction-limit source
+       * (live Stripe API vs. local hardcoded config).
+       */}
+      <TouchableOpacity
+        style={styles.settingsButton}
+        onPress={() => navigation.navigate('Settings')}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityLabel="Demo settings"
+      >
+        <Text style={styles.settingsIcon}>⚙</Text>
+      </TouchableOpacity>
+
       <Text style={styles.title}>{MERCHANT_DISPLAY_NAME}</Text>
       <Text style={styles.subtitle}>Buy crypto with fiat via Stripe</Text>
+
       <TouchableOpacity
         style={styles.button}
         onPress={() => navigation.navigate('Auth')}
@@ -30,6 +46,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 56,
+    right: 24,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  settingsIcon: {
+    fontSize: 20,
+    color: '#888',
   },
   title: {
     fontSize: 32,

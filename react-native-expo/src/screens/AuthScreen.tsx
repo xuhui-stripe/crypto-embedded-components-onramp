@@ -8,6 +8,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { signup, login, createAuthIntent, saveUser, getCryptoCustomer } from '../api/client';
 import { MERCHANT_DISPLAY_NAME } from '../constants';
+import { useSettings } from '../context/SettingsContext';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Auth'>;
@@ -20,6 +21,10 @@ export default function AuthScreen({ navigation }: Props) {
   const [loadingMode, setLoadingMode] = useState<'signup' | 'login' | null>(null);
 
   const { configure, hasLinkAccount, authorize, verifyIdentity } = useOnramp();
+
+  // Read the KYC tier chosen in the Settings screen so we can route the user
+  // through the appropriate identity-collection steps (or skip them for L0).
+  const { settings } = useSettings();
 
   const handleAuth = async (mode: 'signup' | 'login') => {
     if (!email.trim() || !password.trim()) {
@@ -89,8 +94,15 @@ export default function AuthScreen({ navigation }: Props) {
 
       await saveUser(authResult.customerId, authToken);
 
+      // Step 6: Route to KYC collection (or skip) based on the selected tier.
+      //
+      // If the customer already has verified KYC (returning user), we skip
+      // the collection screens regardless of the tier setting.
       const customerRes = await getCryptoCustomer(authResult.customerId, authToken);
+
       if (customerRes.success && customerRes.data.kycStatus === 'verified') {
+        // Customer already completed KYC in a previous session — go straight
+        // to the wallet selection screen.
         const idResult = await verifyIdentity();
         if (idResult?.error) {
           console.log('Identity verification note:', idResult.error.message);
@@ -99,7 +111,17 @@ export default function AuthScreen({ navigation }: Props) {
           customerId: authResult.customerId,
           authToken,
         });
+      } else if (settings.kycTier === 'L0') {
+        // L0 demo: deliberately skip identity collection. The user will have
+        // the lowest transaction limits and will be shown the KYC step-up
+        // screen if they attempt a purchase above those limits.
+        navigation.navigate('Wallet', {
+          customerId: authResult.customerId,
+          authToken,
+        });
       } else {
+        // L1 or L2: proceed through the standard KYC collection flow.
+        // The AddressScreen will conditionally call verifyIdentity() for L2.
         navigation.navigate('KYCPrimer', {
           customerId: authResult.customerId,
           authToken,
