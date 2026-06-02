@@ -83,9 +83,70 @@ export interface PaymentTokensResponse {
   data: PaymentTokenInfo[];
 }
 
+/**
+ * A single per-transaction limit entry returned by the Stripe API.
+ */
+export interface LimitEntry {
+  /** Maximum transaction amount in the fiat currency (e.g. USD). */
+  limit: number;
+  settlement_speed: 'instant' | 'standard';
+}
+
+/** Limits for USD fiat — supports card and ACH bank account. */
+export interface UsdFiatLimits {
+  card?: LimitEntry[];
+  us_bank_account?: LimitEntry[];
+}
+
+/** Limits for EUR fiat — card only (bank account not supported). */
+export interface EurFiatLimits {
+  card?: LimitEntry[];
+}
+
+/**
+ * Returned by GET /v1/crypto/onramp_transaction_limits.
+ *
+ * Each entry in `limits` is an array because a single payment method can
+ * have different limits per settlement speed.
+ *
+ * Example:
+ *   limits["usd.fiat"].card = [{ limit: 3000, settlement_speed: "instant" }]
+ *   limits["usd.fiat"].us_bank_account = [
+ *     { limit: 5000, settlement_speed: "standard" },
+ *     { limit: 1000, settlement_speed: "instant" }
+ *   ]
+ *
+ * These are per-transaction maximums determined by the customer's KYC tier.
+ * A user with no KYC will have lower limits; completing L1/L2 increases them.
+ */
+export interface TransactionLimitsResponse {
+  object: string;
+  crypto_customer_id?: string;
+  livemode: boolean;
+  limits: {
+    'usd.fiat'?: UsdFiatLimits;
+    'eur.fiat'?: EurFiatLimits;
+  };
+}
+
 export interface OnrampSessionResponse {
   id: string;
   client_secret: string;
+  status?: string;
+  /**
+   * Present when the session requires additional verification before the
+   * transaction can be processed.
+   *
+   * Merchant note: check `next_action.required_verifications` after creating
+   * a session. If it is non-empty the user must complete the listed step-up
+   * verifications before checkout can proceed.
+   *
+   * See: https://docs.stripe.com/crypto/onramp/kyc-integration-guide#interpret-limit-errors-from-cryptoonrampsession
+   */
+  next_action?: {
+    type?: string;
+    required_verifications?: Array<'kyc_verified' | 'id_document_verified'>;
+  };
 }
 
 export interface QuoteResponse {
@@ -140,8 +201,9 @@ async function post<T>(
     const data = await res.json();
     if (!res.ok) {
       const message = data.error ?? data.message ?? JSON.stringify(data);
+      const code = data.code ?? `HTTP_${res.status}`;
       console.error(`[API] ${path} failed (${res.status}):`, JSON.stringify(data));
-      return { success: false, error: { code: `HTTP_${res.status}`, message } };
+      return { success: false, error: { code, message } };
     }
     return { success: true, data };
   } catch (err: any) {
@@ -275,4 +337,33 @@ export async function checkoutSession(
   authToken: string,
 ): Promise<ApiResult<OnrampSessionResponse>> {
   return post('/v1/checkout', { cos_id: sessionId }, authToken);
+}
+
+/**
+ * Fetch the customer's per-transaction limits from Stripe.
+ *
+ * Stripe API: GET /v1/crypto/onramp_transaction_limits
+ *
+ * Returns the maximum amounts the customer is allowed to transact per payment
+ * method and settlement speed, based on their current KYC tier. These are
+ * NOT rolling-period balances — they are the ceiling for any single
+ * transaction at the customer's current verification level.
+ *
+ * Pass wallet_address and destination_network for more accurate limits
+ * (some networks or wallet types have different ceilings).
+ *
+ * Compare the card instant limit against the user's requested source amount
+ * before creating a session to detect step-up requirements proactively.
+ */
+export async function getTransactionLimits(
+  authToken: string,
+  params?: {
+    walletAddress?: string;
+    destinationNetwork?: string;
+  },
+): Promise<ApiResult<TransactionLimitsResponse>> {
+  const qs = new URLSearchParams();
+  if (params?.walletAddress) qs.append('wallet_address', params.walletAddress);
+  if (params?.destinationNetwork) qs.append('destination_network', params.destinationNetwork);
+  return get('/v1/crypto/onramp_transaction_limits', authToken, qs);
 }
