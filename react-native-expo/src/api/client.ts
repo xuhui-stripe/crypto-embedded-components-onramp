@@ -126,12 +126,14 @@ async function post<T>(
 async function get<T>(
   path: string,
   authToken?: string,
+  params?: URLSearchParams,
 ): Promise<ApiResult<T>> {
   try {
     const headers: Record<string, string> = {};
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    const query = params?.toString() ? `?${params.toString()}` : '';
 
-    const res = await fetch(`${API_URL}${path}`, { method: 'GET', headers });
+    const res = await fetch(`${API_URL}${path}${query}`, { method: 'GET', headers });
     const data = await res.json();
     if (!res.ok) {
       const message = data.error ?? data.message ?? JSON.stringify(data);
