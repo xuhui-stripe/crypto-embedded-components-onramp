@@ -29,11 +29,37 @@ export interface SaveUserResponse {
   success: boolean;
 }
 
+export interface KycTierEntry {
+  tier: 'l0' | 'l1' | 'l2';
+  verification_status: 'not_started' | 'pending' | 'rejected' | 'verified' | 'not_available';
+  verification_errors?: string[];
+}
+
 export interface CryptoCustomerResponse {
   customerId: string;
   providedFields: string[];
   kycStatus: string;
   idDocStatus: string;
+  kycTiers: KycTierEntry[];
+}
+
+/**
+ * Derive the customer's current KYC tier from the authoritative `kyc_tiers`
+ * array returned by GET /v1/crypto/customers/{id}.
+ *
+ * "Current tier" = the highest tier where verification_status is in
+ * ['pending', 'rejected', 'verified']. Uses kyc_tiers instead of the
+ * verifications array because kyc_verified can be non-not_started even for
+ * L0 customers, making verifications unreliable for tier determination.
+ *
+ * Reference: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
+ */
+export function deriveCurrentTier(kycTiers: KycTierEntry[]): 'l0' | 'l1' | 'l2' {
+  const attempted = ['pending', 'rejected', 'verified'];
+  const find = (t: string) => kycTiers.find(k => k.tier === t)?.verification_status ?? 'not_started';
+  if (attempted.includes(find('l2'))) return 'l2';
+  if (attempted.includes(find('l1'))) return 'l1';
+  return 'l0';
 }
 
 export interface WalletInfo {
