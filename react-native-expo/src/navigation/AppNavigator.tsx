@@ -13,6 +13,7 @@ import KYCScreen from '../screens/KYCScreen';
 import AddressScreen from '../screens/AddressScreen';
 import WalletScreen from '../screens/WalletScreen';
 import PaymentMethodScreen from '../screens/PaymentMethodScreen';
+import KYCStepUpScreen from '../screens/KYCStepUpScreen';
 import CheckoutScreen from '../screens/CheckoutScreen';
 import SuccessScreen from '../screens/SuccessScreen';
 
@@ -41,6 +42,11 @@ export default function AppNavigator() {
           <Stack.Screen name="Address" component={AddressScreen} options={{ title: 'Home Address' }} />
           <Stack.Screen name="Wallet" component={WalletScreen} options={{ title: 'Add Wallet' }} />
           <Stack.Screen name="PaymentMethod" component={PaymentMethodScreen} options={{ title: 'Payment' }} />
+          <Stack.Screen
+            name="KYCStepUp"
+            component={KYCStepUpScreen}
+            options={{ title: 'Verify Identity' }}
+          />
           <Stack.Screen name="Checkout" component={CheckoutScreen} options={{ title: 'Review Order', headerBackVisible: false }} />
           <Stack.Screen name="Success" component={SuccessScreen} options={{ headerShown: false }} />
         </Stack.Navigator>
