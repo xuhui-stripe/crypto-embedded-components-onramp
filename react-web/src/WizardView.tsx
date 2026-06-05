@@ -379,9 +379,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const rawLimits = isBankOnly
     ? (usdFiat?.us_bank_account ?? [])
     : (usdFiat?.card ?? []);
-  const limitEntry =
-    rawLimits.find((l) => l.settlement_speed === "instant") ?? rawLimits[0];
-  const limitDollars = limitEntry ? limitEntry.limit / 100 : null;
+  const limitDollars = rawLimits[0] ? rawLimits[0].limit / 100 : null;
   const limitLabel = isBankOnly ? "Bank limit" : "Card limit";
   const exceedsLimit = limitDollars !== null && parseFloat(amount) > limitDollars;
   const canNext = (s: number) => {
