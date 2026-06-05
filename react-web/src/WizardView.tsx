@@ -155,6 +155,9 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const paymentRef = useRef<HTMLDivElement>(null);
   const [payMounted, setPayMounted] = useState(false);
 
+  // Step 3: track which payment method types the user selected
+  const [collectedPaymentTypes, setCollectedPaymentTypes] = useState<string[]>([]);
+
   // Step 4: Buy — transaction limits (fetched in parallel when the step loads)
   const [transactionLimits, setTransactionLimits] = useState<{
     object: string;
@@ -369,13 +372,20 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const amount = selectedAmt ?? customAmt;
   const isAmountValid = amount && parseFloat(amount) > 0;
 
-  // Derive card instant limit in dollars (API returns cents).
-  const cardLimits = transactionLimits?.limits?.["usd.fiat"]?.card ?? [];
-  const instantEntry =
-    cardLimits.find((l) => l.settlement_speed === "instant") ?? cardLimits[0];
-  const cardInstantLimitDollars = instantEntry ? instantEntry.limit / 100 : null;
-  const exceedsLimit =
-    cardInstantLimitDollars !== null && parseFloat(amount) > cardInstantLimitDollars;
+  // Derive per-transaction limit in dollars based on selected payment method (API returns cents).
+  const isBankOnly =
+    collectedPaymentTypes.length === 1 && collectedPaymentTypes[0] === "us_bank_account";
+  const usdFiat = transactionLimits?.limits?.["usd.fiat"];
+  const rawLimits = isBankOnly
+    ? (usdFiat?.us_bank_account ?? [])
+    : (usdFiat?.card ?? []);
+  const limitEntry =
+    rawLimits.find((l) => l.settlement_speed === "instant") ?? rawLimits[0];
+  const limitDollars = limitEntry ? limitEntry.limit / 100 : null;
+  const limitLabel = isBankOnly
+    ? `Bank limit (${limitEntry?.settlement_speed ?? "standard"})`
+    : `Card limit (${limitEntry?.settlement_speed ?? "instant"})`;
+  const exceedsLimit = limitDollars !== null && parseFloat(amount) > limitDollars;
   const canNext = (s: number) => {
     switch (s) {
       case 0:
@@ -976,6 +986,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                   onClick={async () => {
                     if (!paymentRef.current) return;
                     paymentRef.current.innerHTML = "";
+                    setCollectedPaymentTypes(types);
                     const el = await props.onCollectPaymentMethod(types, {
                       applePay: "auto",
                       googlePay: "auto",
@@ -1341,11 +1352,11 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                     letterSpacing: 0.8,
                   }}
                 >
-                  Card limit (instant)
+                  {limitLabel}
                 </Typography>
                 {loadingLimits ? (
                   <CircularProgress size={12} sx={{ color: colors.accent }} />
-                ) : cardInstantLimitDollars !== null ? (
+                ) : limitDollars !== null ? (
                   <Typography
                     sx={{
                       fontSize: "0.85rem",
@@ -1353,7 +1364,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                       color: exceedsLimit ? colors.error : colors.textPrimary,
                     }}
                   >
-                    ${cardInstantLimitDollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${limitDollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </Typography>
                 ) : (
                   <Typography sx={{ fontSize: "0.8rem", color: colors.textMuted }}>
