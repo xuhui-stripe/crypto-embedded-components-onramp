@@ -8,6 +8,7 @@ import {
   Divider,
   InputAdornment,
   Link,
+  LinearProgress,
   MenuItem,
   Snackbar,
   Stack,
@@ -166,6 +167,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
       };
     };
   } | null>(null);
+  const [loadingLimits, setLoadingLimits] = useState(false);
 
   const [buySubStep, setBuySubStep] = useState<
     "amount" | "confirm" | "polling" | "result"
@@ -311,10 +313,11 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   }, [step, fetchWallets]);
 
   // Fetch transaction limits when entering the Buy step, in parallel with any
-  // other loading the step does. The result is stored for use (e.g. limit checks)
-  // but not acted upon yet.
+  // other loading the step does.
   useEffect(() => {
     if (step !== 4 || !props.linkAuthIntentId) return;
+    setTransactionLimits(null);
+    setLoadingLimits(true);
     const lai = props.linkAuthIntentId;
     const qs = new URLSearchParams({ lai, livemode: String(props.livemode) });
     if (props.selectedWallet) qs.append("wallet_address", props.selectedWallet);
@@ -325,7 +328,8 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         if (data && data.limits) setTransactionLimits(data);
         else props.log("Transaction limits fetch returned unexpected shape", JSON.stringify(data));
       })
-      .catch((e) => props.log("Transaction limits fetch failed", e?.message || String(e)));
+      .catch((e) => props.log("Transaction limits fetch failed", e?.message || String(e)))
+      .finally(() => setLoadingLimits(false));
   }, [step, props.linkAuthIntentId, props.livemode, props.selectedWallet, props.selectedWalletNetwork]);
 
   // ─── Poll checkout ────────────────────────────────────
@@ -364,6 +368,14 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     : undefined;
   const amount = selectedAmt ?? customAmt;
   const isAmountValid = amount && parseFloat(amount) > 0;
+
+  // Derive card instant limit in dollars (API returns cents).
+  const cardLimits = transactionLimits?.limits?.["usd.fiat"]?.card ?? [];
+  const instantEntry =
+    cardLimits.find((l) => l.settlement_speed === "instant") ?? cardLimits[0];
+  const cardInstantLimitDollars = instantEntry ? instantEntry.limit / 100 : null;
+  const exceedsLimit =
+    cardInstantLimitDollars !== null && parseFloat(amount) > cardInstantLimitDollars;
   const canNext = (s: number) => {
     switch (s) {
       case 0:
@@ -1303,6 +1315,77 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 ),
               }}
             />
+
+            {/* Transaction limits card */}
+            <Box
+              sx={{
+                borderRadius: 1.5,
+                border: "1px solid",
+                borderColor: exceedsLimit ? colors.error + "55" : colors.borderSubtle,
+                bgcolor: exceedsLimit ? colors.error + "0a" : colors.cardBgAlt,
+                overflow: "hidden",
+              }}
+            >
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ px: 1.5, pt: 1.25, pb: loadingLimits ? 0 : 1.25 }}
+              >
+                <Typography
+                  sx={{
+                    color: colors.textMuted,
+                    fontSize: "0.7rem",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.8,
+                  }}
+                >
+                  Card limit (instant)
+                </Typography>
+                {loadingLimits ? (
+                  <CircularProgress size={12} sx={{ color: colors.accent }} />
+                ) : cardInstantLimitDollars !== null ? (
+                  <Typography
+                    sx={{
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      color: exceedsLimit ? colors.error : colors.textPrimary,
+                    }}
+                  >
+                    ${cardInstantLimitDollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                ) : (
+                  <Typography sx={{ fontSize: "0.8rem", color: colors.textMuted }}>
+                    —
+                  </Typography>
+                )}
+              </Stack>
+              {loadingLimits && (
+                <LinearProgress
+                  sx={{
+                    mt: 1,
+                    height: 2,
+                    bgcolor: colors.borderSubtle,
+                    "& .MuiLinearProgress-bar": { bgcolor: colors.accent },
+                  }}
+                />
+              )}
+              {exceedsLimit && !loadingLimits && (
+                <Typography
+                  sx={{
+                    px: 1.5,
+                    pb: 1.25,
+                    fontSize: "0.75rem",
+                    color: colors.error,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Amount exceeds your current limit. Complete additional identity
+                  verification to unlock higher limits.
+                </Typography>
+              )}
+            </Box>
 
             <Button
               variant="contained"
