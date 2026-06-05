@@ -385,6 +385,67 @@ app.get(
   },
 );
 
+// Fetch the customer's per-transaction limits from Stripe.
+//
+// Stripe API: GET /v1/crypto/onramp_transaction_limits
+//
+// Optional query params forwarded to Stripe:
+//   wallet_address, destination_network
+//
+// Response shape:
+//   {
+//     object: "crypto.onramp_transaction_limits",
+//     crypto_customer_id: "crc_...",
+//     limits: {
+//       "usd.fiat": {
+//         card: [{ limit: 300000, settlement_speed: "instant" }],
+//         us_bank_account: [{ limit: 500000, settlement_speed: "standard" }]
+//       }
+//     }
+//   }
+//
+// Note: limit values are in cents — divide by 100 for dollars.
+app.get("/api/crypto/onramp_transaction_limits", async (req, res) => {
+  try {
+    const { secretKey } = getApiKeys(getLivemode(req));
+    const lai = req.query.lai as string;
+
+    if (!lai) {
+      return res.status(400).json({ error: "Missing lai query param" });
+    }
+
+    const accessToken = await getAccessToken(lai, secretKey);
+    if (!accessToken) {
+      return res.status(404).json({ error: "Access Token Not Found." });
+    }
+
+    const qs = new URLSearchParams();
+    const { wallet_address, destination_network } = req.query as Record<string, string>;
+    if (wallet_address) qs.append("wallet_address", wallet_address);
+    if (destination_network) qs.append("destination_network", destination_network);
+    qs.append("customer_ip_address", req.ip || req.socket.remoteAddress || "127.0.0.1");
+
+    const response = await axios.get(
+      `https://api.stripe.com/v1/crypto/onramp_transaction_limits?${qs.toString()}`,
+      {
+        headers: {
+          Authorization: getBasicAuth(secretKey),
+          "Stripe-OAuth-Token": accessToken,
+          "Stripe-Version": `${STRIPE_API_VERSION};crypto_onramp_beta=v2`,
+        },
+      },
+    );
+    res.json(response.data);
+  } catch (error: any) {
+    console.error(
+      "Error fetching transaction limits:",
+      error?.response?.data || error.message,
+    );
+    const status = error?.response?.status || 500;
+    res.status(status).json({ error: error?.response?.data || error.message });
+  }
+});
+
 app.get("/api/config", (req, res) => {
   const { publishableKey } = getApiKeys(getLivemode(req));
   res.json({ publishableKey });

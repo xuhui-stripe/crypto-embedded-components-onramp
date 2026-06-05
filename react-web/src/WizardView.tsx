@@ -154,7 +154,19 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const paymentRef = useRef<HTMLDivElement>(null);
   const [payMounted, setPayMounted] = useState(false);
 
-  // Step 4: Buy
+  // Step 4: Buy — transaction limits (fetched in parallel when the step loads)
+  const [transactionLimits, setTransactionLimits] = useState<{
+    object: string;
+    crypto_customer_id?: string;
+    livemode: boolean;
+    limits: {
+      'usd.fiat'?: {
+        card?: Array<{ limit: number; settlement_speed: string }>;
+        us_bank_account?: Array<{ limit: number; settlement_speed: string }>;
+      };
+    };
+  } | null>(null);
+
   const [buySubStep, setBuySubStep] = useState<
     "amount" | "confirm" | "polling" | "result"
   >("amount");
@@ -297,6 +309,24 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   useEffect(() => {
     if (step === 2) fetchWallets();
   }, [step, fetchWallets]);
+
+  // Fetch transaction limits when entering the Buy step, in parallel with any
+  // other loading the step does. The result is stored for use (e.g. limit checks)
+  // but not acted upon yet.
+  useEffect(() => {
+    if (step !== 4 || !props.linkAuthIntentId) return;
+    const lai = props.linkAuthIntentId;
+    const qs = new URLSearchParams({ lai, livemode: String(props.livemode) });
+    if (props.selectedWallet) qs.append("wallet_address", props.selectedWallet);
+    if (props.selectedWalletNetwork) qs.append("destination_network", props.selectedWalletNetwork);
+    fetch(`/api/crypto/onramp_transaction_limits?${qs.toString()}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.limits) setTransactionLimits(data);
+        else props.log("Transaction limits fetch returned unexpected shape", JSON.stringify(data));
+      })
+      .catch((e) => props.log("Transaction limits fetch failed", e?.message || String(e)));
+  }, [step, props.linkAuthIntentId, props.livemode, props.selectedWallet, props.selectedWalletNetwork]);
 
   // ─── Poll checkout ────────────────────────────────────
 
