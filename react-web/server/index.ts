@@ -286,33 +286,36 @@ app.get("/api/crypto/customers/:customerId", async (req, res) => {
       },
     );
     const data = response.data;
-    const verifications: Array<{ name: string; status: string }> =
-      data.verifications || [];
-    const providedFields = data.provided_fields || [];
+    const kycTiers: Array<{ tier: string; verification_status: string }> =
+      data.kyc_tiers ?? [];
     const kycRegion = data.kyc_region ?? null;
-    const kycTiers = data.kyc_tiers ?? [];
+    const verifications = data.verifications || [];
+    const providedFields = data.provided_fields || [];
 
+    // Derive kyc_level from kyc_tiers per the KYC integration guide.
+    // Current tier = highest tier where status is not not_available or not_started.
+    const INACTIVE = new Set(["not_available", "not_started"]);
+    const ATTEMPTED = new Set(["pending", "rejected", "verified"]);
+    const statusOf = (tier: string) =>
+      kycTiers.find((t) => t.tier === tier)?.verification_status ?? "not_started";
 
-    // Derive kyc_level from kyc_tiers (canonical source) with verifications as fallback
     let kyc_level: string;
-    const getTierStatus = (tier: string) =>
-      kycTiers.find((t: any) => t.tier === tier)?.verification_status;
-
-    if (getTierStatus("l2") === "verified") {
-      kyc_level = "L2";
-    } else if (getTierStatus("l1") === "verified") {
-      kyc_level = "L1";
-    } else if (getTierStatus("l0") === "verified") {
-      kyc_level = "L0";
-    } else if (kycTiers.some((t: any) => t.verification_status === "pending")) {
+    if (kycTiers.some((t) => t.verification_status === "pending")) {
       kyc_level = "PENDING";
-    } else if (
-      kycTiers.length === 0 ||
-      kycTiers.every((t: any) => t.verification_status === "not_started" || t.verification_status === "not_available")
-    ) {
+    } else if (kycTiers.every((t) => INACTIVE.has(t.verification_status))) {
       kyc_level = "REQUIRES_KYC";
     } else {
-      kyc_level = "REJECTED";
+      const currentTier =
+        ATTEMPTED.has(statusOf("l2")) ? "l2" :
+        ATTEMPTED.has(statusOf("l1")) ? "l1" : "l0";
+      const currentStatus = statusOf(currentTier);
+      if (currentStatus === "verified") {
+        kyc_level = currentTier === "l2" ? "L2" : currentTier === "l1" ? "L1" : "L0";
+      } else if (currentStatus === "rejected") {
+        kyc_level = "REJECTED";
+      } else {
+        kyc_level = "REQUIRES_KYC";
+      }
     }
 
     return res.json({
