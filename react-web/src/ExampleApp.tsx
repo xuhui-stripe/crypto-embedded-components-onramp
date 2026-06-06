@@ -724,36 +724,26 @@ const ExampleAppInner: React.FC<{
               placeholder="lai_..."
               sx={{ ...t.inputSx, width: 260 }}
             />
-            <Stack spacing={0.5}>
-              <Typography sx={{ color: c.textSecondary, fontSize: "0.8rem" }}>
-                Limit Source
-              </Typography>
-              <ToggleButtonGroup
-                value={limitSource}
-                exclusive
-                onChange={(_, v) => v && setLimitSource(v)}
-                size="small"
-                sx={{
-                  "& .MuiToggleButton-root": {
-                    color: c.textSecondary,
-                    borderColor: c.borderSubtle,
-                    textTransform: "none",
-                    px: 1.5,
-                    py: 0.25,
-                    fontSize: "0.75rem",
-                    "&.Mui-selected": {
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={limitSource === "api"}
+                  onChange={(e) => setLimitSource(e.target.checked ? "api" : "local")}
+                  size="small"
+                  sx={{
+                    "& .MuiSwitch-switchBase.Mui-checked": { color: c.accent },
+                    "& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track": {
                       bgcolor: c.accent,
-                      color: "#fff",
-                      borderColor: c.accent,
-                      "&:hover": { bgcolor: c.accentLight },
                     },
-                  },
-                }}
-              >
-                <ToggleButton value="api">API</ToggleButton>
-                <ToggleButton value="local">Local Config</ToggleButton>
-              </ToggleButtonGroup>
-            </Stack>
+                  }}
+                />
+              }
+              label={
+                <Typography sx={{ color: c.textSecondary, fontSize: "0.8rem" }}>
+                  Fetch Limit API
+                </Typography>
+              }
+            />
           </Stack>
         </Box>
       </Collapse>
