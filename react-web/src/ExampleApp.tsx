@@ -116,6 +116,7 @@ const ExampleAppInner: React.FC<{
   );
   const [kycLevel, setKYCLevel] = useState<KycLevel>("REQUIRES_KYC");
   const [currentKycTier, setCurrentKycTier] = useState<"L0" | "L1" | "L2" | null>(null);
+  const [limitSource, setLimitSource] = useState<"api" | "local">("api");
   const [kycRegion, setKycRegion] = useState<KycRegion>(null);
   const [providedFields, setProvidedFields] = useState<string[]>([]);
   const [cryptoCustomerId, setCryptoCustomerId] = useState<
@@ -723,6 +724,36 @@ const ExampleAppInner: React.FC<{
               placeholder="lai_..."
               sx={{ ...t.inputSx, width: 260 }}
             />
+            <Stack spacing={0.5}>
+              <Typography sx={{ color: c.textSecondary, fontSize: "0.8rem" }}>
+                Limit Source
+              </Typography>
+              <ToggleButtonGroup
+                value={limitSource}
+                exclusive
+                onChange={(_, v) => v && setLimitSource(v)}
+                size="small"
+                sx={{
+                  "& .MuiToggleButton-root": {
+                    color: c.textSecondary,
+                    borderColor: c.borderSubtle,
+                    textTransform: "none",
+                    px: 1.5,
+                    py: 0.25,
+                    fontSize: "0.75rem",
+                    "&.Mui-selected": {
+                      bgcolor: c.accent,
+                      color: "#fff",
+                      borderColor: c.accent,
+                      "&:hover": { bgcolor: c.accentLight },
+                    },
+                  },
+                }}
+              >
+                <ToggleButton value="api">API</ToggleButton>
+                <ToggleButton value="local">Local Config</ToggleButton>
+              </ToggleButtonGroup>
+            </Stack>
           </Stack>
         </Box>
       </Collapse>
@@ -767,6 +798,7 @@ const ExampleAppInner: React.FC<{
             }}
             authenticating={!!authenticationElement}
             currentKycTier={currentKycTier}
+            limitSource={limitSource}
             log={log}
           />
         ) : (

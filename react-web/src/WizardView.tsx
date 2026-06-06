@@ -23,6 +23,7 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Dayjs } from "dayjs";
 import type { KycInfo, CryptoNetwork, OnrampCoordinator } from "@stripe/crypto";
 import { getTheme } from "./theme";
+import { LOCAL_LIMITS } from "./kycLimits";
 import { EXPLORER_URLS, getNetworks, isEuCountry, EU_COUNTRIES } from "./shared";
 import { EU_COUNTRY_NAMES } from "./euIdentifiers";
 import type { AccountStatus, KycLevel, KycRegion, Wallet, OnrampSession } from "./types";
@@ -69,6 +70,7 @@ export type WizardViewProps = {
   onRefreshKycLevel: () => void;
   authenticating: boolean;
   currentKycTier: "L0" | "L1" | "L2" | null;
+  limitSource: "api" | "local";
   log: (event: string, detail?: string) => void;
 };
 
@@ -106,6 +108,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     kycLevel,
     currentKycTier,
     polling,
+    limitSource,
   } = props;
 
   const KYC_CHIP: Record<string, { color: string; label: string }> = {
@@ -369,7 +372,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   // Fetch transaction limits when entering the Buy step, in parallel with any
   // other loading the step does.
   useEffect(() => {
-    if (step !== 4 || !linkAuthIntentId) return;
+    if (step !== 4 || !linkAuthIntentId || limitSource === "local") return;
     setTransactionLimits(null);
     setLoadingLimits(true);
     const qs = new URLSearchParams({ lai: linkAuthIntentId, livemode: String(livemode) });
@@ -383,7 +386,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
       })
       .catch((e) => log("Transaction limits fetch failed", e?.message || String(e)))
       .finally(() => setLoadingLimits(false));
-  }, [step, linkAuthIntentId, livemode, selectedWallet, selectedWalletNetwork, log]);
+  }, [step, linkAuthIntentId, livemode, selectedWallet, selectedWalletNetwork, limitSource, log]);
 
   // ─── Poll checkout ────────────────────────────────────
 
@@ -429,8 +432,14 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const rawLimits = isBankOnly
     ? (usdFiat?.us_bank_account ?? [])
     : (usdFiat?.card ?? []);
-  const limitDollars = rawLimits[0] ? rawLimits[0].limit / 100 : null;
-  const limitLabel = isBankOnly ? "Bank limit" : "Card limit";
+  const apiLimitDollars = rawLimits[0] ? rawLimits[0].limit / 100 : null;
+  const localLimitDollars =
+    currentKycTier ? LOCAL_LIMITS[currentKycTier].limit : null;
+  const limitDollars =
+    limitSource === "local" ? localLimitDollars : apiLimitDollars;
+  const limitLabel = limitSource === "local"
+    ? "Limit (local config)"
+    : isBankOnly ? "Bank limit" : "Card limit";
   const exceedsLimit = limitDollars !== null && parseFloat(amount) > limitDollars;
   const canNext = (s: number) => {
     switch (s) {
