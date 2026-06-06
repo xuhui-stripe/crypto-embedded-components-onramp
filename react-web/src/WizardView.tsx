@@ -672,7 +672,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                   mb: 0.5,
                 }}
               >
-                {stepUpFromTier ? "Boost Your Limits" : "Verify Your Identity"}
+                {stepUpFromTier ? "Verify Your Identity (unlock higher limits)" : "Verify Your Identity"}
               </Typography>
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Chip
