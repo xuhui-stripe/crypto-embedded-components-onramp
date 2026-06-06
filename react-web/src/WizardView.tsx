@@ -77,47 +77,39 @@ export type WizardViewProps = {
 // ─── Constants ─────────────────────────────────────────────
 
 /**
- * Screen (step) order for the onramp wizard.
+ * Onramp wizard — screen flow
  *
- *   0 — Login    User enters email; existing Link account triggers OAuth
- *                authentication. New users register with name + phone.
+ * Normal path (first-time user):
  *
- *   1 — KYC      Identity verification. The content shown depends on the
- *                user's current KYC level (kycLevel prop):
- *                  REQUIRES_KYC / REJECTED → full L0 form (name, address)
- *                  L0                      → L1 step-up form (SSN, DOB)
- *                  L1                      → L2 document verification button
- *                  L2                      → already fully verified, next is enabled
+ *   ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌─────────────┐    ┌─────────┐
+ *   │ 0 Login │───▶│  1 KYC  │───▶│ 2 Wallet │───▶│ 3 Payment   │───▶│  4 Buy  │
+ *   └─────────┘    └─────────┘    └──────────┘    └─────────────┘    └─────────┘
  *
- *                KYC step-up flow (triggered from Buy screen):
- *                  When the user's purchase amount exceeds their current tier's
- *                  transaction limit, the Buy screen disables the Review button
- *                  and shows a step-up CTA. Clicking it sets `stepUpFromTier`
- *                  and navigates here (step 1). The screen title changes to
- *                  "Verify Your Identity (unlock higher limits)" and a
- *                  "← Back to Buy" link is shown. Once the user submits the
- *                  additional KYC data, ExampleApp polls until the new tier is
- *                  verified, then the step-up effect (see below) automatically
- *                  navigates back to Buy (step 4).
+ * KYC step-up path (amount exceeds current tier limit):
  *
- *                To add a new KYC step-up trigger:
- *                  1. Detect the limit breach in the Buy screen (step 4).
- *                  2. Set `stepUpFromTier` to the user's current tier ("L0" or "L1").
- *                  3. Call `goTo(1)`.
- *                  4. The useEffect below handles the return trip once the tier advances.
+ *   ┌─────────┐    amount > limit (L0 or L1)           tier verified
+ *   │  4 Buy  │──────────────────────────────▶ ┌─────────────────────┐
+ *   │         │◀──────────────────────────────  │  1 KYC (step-up)    │
+ *   └─────────┘    goTo(4) auto on tier advance └─────────────────────┘
+ *                                                  L0 → SSN + DOB form
+ *                                                  L1 → Verify Documents
  *
- *   2 — Wallet   User selects or registers a crypto wallet address.
+ * KYC screen content (step 1) by kycLevel:
+ *   REQUIRES_KYC / REJECTED → full L0 form (name, address, optional SSN/DOB)
+ *   L0                      → L1 step-up form (SSN + DOB required)
+ *   L1                      → L2 document verification button
+ *   L2                      → already fully verified, Next enabled
  *
- *   3 — Payment  User selects a payment method (card, bank, or both).
- *                Calls `onCollectPaymentMethod`, which mounts the Stripe
- *                payment element and returns a `cryptoPaymentToken` on completion.
+ * Transaction limits (step 4):
+ *   Settings "Fetch Limit API" ON  → live limits from GET /v1/crypto/onramp_transaction_limits
+ *   Settings "Fetch Limit API" OFF → local config (kycLimits.ts): L0 $300 / L1 $800 / L2 $1500
  *
- *   4 — Buy      User picks an amount and reviews the quote.
- *                Transaction limits are fetched here (or read from local config
- *                when Settings → "Fetch Limit API" is off) and shown alongside
- *                the amount input. If the amount exceeds the current tier limit
- *                and the user is below L2, a step-up CTA is shown instead of
- *                the Review button.
+ * To wire up a new step-up trigger from any screen:
+ *   1. Detect the condition (e.g. limit breach, required_verifications error).
+ *   2. Set stepUpFromTier to the user's current tier ("L0" or "L1").
+ *   3. Call goTo(1) — the KYC screen renders the correct form automatically.
+ *   4. The step-up completion useEffect watches kycLevel + polling and calls
+ *      goTo(4) once the new tier is verified, returning the user to Buy.
  */
 const STEPS = ["Login", "KYC", "Wallet", "Payment", "Buy"];
 const PRESET_AMOUNTS = ["1", "5", "25", "100"];
