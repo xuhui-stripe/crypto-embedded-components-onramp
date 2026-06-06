@@ -8,6 +8,7 @@ import {
   Divider,
   InputAdornment,
   Link,
+  LinearProgress,
   MenuItem,
   Snackbar,
   Stack,
@@ -161,7 +162,23 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const paymentRef = useRef<HTMLDivElement>(null);
   const [payMounted, setPayMounted] = useState(false);
 
-  // Step 4: Buy
+  // Step 3: track which payment method types the user selected
+  const [collectedPaymentTypes, setCollectedPaymentTypes] = useState<string[]>([]);
+
+  // Step 4: Buy — transaction limits (fetched in parallel when the step loads)
+  const [transactionLimits, setTransactionLimits] = useState<{
+    object: string;
+    crypto_customer_id?: string;
+    livemode: boolean;
+    limits: {
+      'usd.fiat'?: {
+        card?: Array<{ limit: number; settlement_speed: string }>;
+        us_bank_account?: Array<{ limit: number; settlement_speed: string }>;
+      };
+    };
+  } | null>(null);
+  const [loadingLimits, setLoadingLimits] = useState(false);
+
   const [buySubStep, setBuySubStep] = useState<
     "amount" | "confirm" | "polling" | "result"
   >("amount");
@@ -305,6 +322,26 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     if (step === 2) fetchWallets();
   }, [step, fetchWallets]);
 
+  // Fetch transaction limits when entering the Buy step, in parallel with any
+  // other loading the step does.
+  useEffect(() => {
+    if (step !== 4 || !props.linkAuthIntentId) return;
+    setTransactionLimits(null);
+    setLoadingLimits(true);
+    const lai = props.linkAuthIntentId;
+    const qs = new URLSearchParams({ lai, livemode: String(props.livemode) });
+    if (props.selectedWallet) qs.append("wallet_address", props.selectedWallet);
+    if (props.selectedWalletNetwork) qs.append("destination_network", props.selectedWalletNetwork);
+    fetch(`/api/crypto/onramp_transaction_limits?${qs.toString()}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.limits) setTransactionLimits(data);
+        else props.log("Transaction limits fetch returned unexpected shape", JSON.stringify(data));
+      })
+      .catch((e) => props.log("Transaction limits fetch failed", e?.message || String(e)))
+      .finally(() => setLoadingLimits(false));
+  }, [step, props.linkAuthIntentId, props.livemode, props.selectedWallet, props.selectedWalletNetwork]);
+
   // ─── Poll checkout ────────────────────────────────────
 
   const pollSession = useCallback(
@@ -341,6 +378,17 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     : undefined;
   const amount = selectedAmt ?? customAmt;
   const isAmountValid = amount && parseFloat(amount) > 0;
+
+  // Derive per-transaction limit in dollars based on selected payment method (API returns cents).
+  const isBankOnly =
+    collectedPaymentTypes.length === 1 && collectedPaymentTypes[0] === "us_bank_account";
+  const usdFiat = transactionLimits?.limits?.["usd.fiat"];
+  const rawLimits = isBankOnly
+    ? (usdFiat?.us_bank_account ?? [])
+    : (usdFiat?.card ?? []);
+  const limitDollars = rawLimits[0] ? rawLimits[0].limit / 100 : null;
+  const limitLabel = isBankOnly ? "Bank limit" : "Card limit";
+  const exceedsLimit = limitDollars !== null && parseFloat(amount) > limitDollars;
   const canNext = (s: number) => {
     switch (s) {
       case 0:
@@ -1045,6 +1093,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                   onClick={async () => {
                     if (!paymentRef.current) return;
                     paymentRef.current.innerHTML = "";
+                    setCollectedPaymentTypes(types);
                     const el = await props.onCollectPaymentMethod(types, {
                       applePay: "auto",
                       googlePay: "auto",
@@ -1384,6 +1433,77 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 ),
               }}
             />
+
+            {/* Transaction limits card */}
+            <Box
+              sx={{
+                borderRadius: 1.5,
+                border: "1px solid",
+                borderColor: exceedsLimit ? colors.error + "55" : colors.borderSubtle,
+                bgcolor: exceedsLimit ? colors.error + "0a" : colors.cardBgAlt,
+                overflow: "hidden",
+              }}
+            >
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ px: 1.5, pt: 1.25, pb: loadingLimits ? 0 : 1.25 }}
+              >
+                <Typography
+                  sx={{
+                    color: colors.textMuted,
+                    fontSize: "0.7rem",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.8,
+                  }}
+                >
+                  {limitLabel}
+                </Typography>
+                {loadingLimits ? (
+                  <CircularProgress size={12} sx={{ color: colors.accent }} />
+                ) : limitDollars !== null ? (
+                  <Typography
+                    sx={{
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      color: exceedsLimit ? colors.error : colors.textPrimary,
+                    }}
+                  >
+                    ${limitDollars.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Typography>
+                ) : (
+                  <Typography sx={{ fontSize: "0.8rem", color: colors.textMuted }}>
+                    —
+                  </Typography>
+                )}
+              </Stack>
+              {loadingLimits && (
+                <LinearProgress
+                  sx={{
+                    mt: 1,
+                    height: 2,
+                    bgcolor: colors.borderSubtle,
+                    "& .MuiLinearProgress-bar": { bgcolor: colors.accent },
+                  }}
+                />
+              )}
+              {exceedsLimit && !loadingLimits && (
+                <Typography
+                  sx={{
+                    px: 1.5,
+                    pb: 1.25,
+                    fontSize: "0.75rem",
+                    color: colors.error,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Amount exceeds your current limit. Complete additional identity
+                  verification to unlock higher limits.
+                </Typography>
+              )}
+            </Box>
 
             <Button
               variant="contained"
