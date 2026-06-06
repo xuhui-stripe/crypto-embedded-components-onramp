@@ -173,6 +173,8 @@ const ExampleAppInner: React.FC<{
         "L2",
         "REJECTED",
       ]);
+      const POLL_TIMEOUT_MS = 2 * 60 * 1000;
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
       setPolling(true);
       setError(null);
       log("Polling KYC level...");
@@ -201,6 +203,11 @@ const ExampleAppInner: React.FC<{
           setKYCLevel(level);
           if (terminalStates.has(level)) break;
           if (level === "PENDING" && json.kyc_region === "eu") break;
+          if (Date.now() >= deadline) {
+            log("KYC polling timed out after 2 minutes");
+            surfaceError("Verification is taking longer than expected. Please refresh the page to check your status.");
+            break;
+          }
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } catch (e) {
