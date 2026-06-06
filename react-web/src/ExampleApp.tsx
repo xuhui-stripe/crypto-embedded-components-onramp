@@ -716,14 +716,6 @@ const ExampleAppInner: React.FC<{
                 </Typography>
               }
             />
-            <TextField
-              label="LAI Override"
-              value={settingsLai ?? ""}
-              onChange={(e) => setSettingsLai(e.target.value || null)}
-              size="small"
-              placeholder="lai_..."
-              sx={{ ...t.inputSx, width: 260 }}
-            />
             <FormControlLabel
               control={
                 <Switch
@@ -743,6 +735,14 @@ const ExampleAppInner: React.FC<{
                   Fetch Limit API
                 </Typography>
               }
+            />
+            <TextField
+              label="LAI Override"
+              value={settingsLai ?? ""}
+              onChange={(e) => setSettingsLai(e.target.value || null)}
+              size="small"
+              placeholder="lai_..."
+              sx={{ ...t.inputSx, width: 260 }}
             />
           </Stack>
         </Box>
