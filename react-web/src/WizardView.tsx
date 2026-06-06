@@ -76,6 +76,49 @@ export type WizardViewProps = {
 
 // ─── Constants ─────────────────────────────────────────────
 
+/**
+ * Screen (step) order for the onramp wizard.
+ *
+ *   0 — Login    User enters email; existing Link account triggers OAuth
+ *                authentication. New users register with name + phone.
+ *
+ *   1 — KYC      Identity verification. The content shown depends on the
+ *                user's current KYC level (kycLevel prop):
+ *                  REQUIRES_KYC / REJECTED → full L0 form (name, address)
+ *                  L0                      → L1 step-up form (SSN, DOB)
+ *                  L1                      → L2 document verification button
+ *                  L2                      → already fully verified, next is enabled
+ *
+ *                KYC step-up flow (triggered from Buy screen):
+ *                  When the user's purchase amount exceeds their current tier's
+ *                  transaction limit, the Buy screen disables the Review button
+ *                  and shows a step-up CTA. Clicking it sets `stepUpFromTier`
+ *                  and navigates here (step 1). The screen title changes to
+ *                  "Verify Your Identity (unlock higher limits)" and a
+ *                  "← Back to Buy" link is shown. Once the user submits the
+ *                  additional KYC data, ExampleApp polls until the new tier is
+ *                  verified, then the step-up effect (see below) automatically
+ *                  navigates back to Buy (step 4).
+ *
+ *                To add a new KYC step-up trigger:
+ *                  1. Detect the limit breach in the Buy screen (step 4).
+ *                  2. Set `stepUpFromTier` to the user's current tier ("L0" or "L1").
+ *                  3. Call `goTo(1)`.
+ *                  4. The useEffect below handles the return trip once the tier advances.
+ *
+ *   2 — Wallet   User selects or registers a crypto wallet address.
+ *
+ *   3 — Payment  User selects a payment method (card, bank, or both).
+ *                Calls `onCollectPaymentMethod`, which mounts the Stripe
+ *                payment element and returns a `cryptoPaymentToken` on completion.
+ *
+ *   4 — Buy      User picks an amount and reviews the quote.
+ *                Transaction limits are fetched here (or read from local config
+ *                when Settings → "Fetch Limit API" is off) and shown alongside
+ *                the amount input. If the amount exceeds the current tier limit
+ *                and the user is below L2, a step-up CTA is shown instead of
+ *                the Review button.
+ */
 const STEPS = ["Login", "KYC", "Wallet", "Payment", "Buy"];
 const PRESET_AMOUNTS = ["1", "5", "25", "100"];
 
@@ -183,7 +226,14 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   // Step 3: track which payment method types the user selected
   const [collectedPaymentTypes, setCollectedPaymentTypes] = useState<string[]>([]);
 
-  // KYC step-up: tier the user was at when they triggered the step-up from Buy screen
+  // Tracks which tier the user was at when they triggered the step-up from the Buy
+  // screen. Non-null while the user is in the step-up sub-flow (step 1 in boost mode).
+  // Cleared automatically once the target tier is verified and goTo(4) fires.
+  //
+  // State machine:
+  //   null           — normal flow, no step-up in progress
+  //   "L0"           — user came from Buy at L0; waiting for L1 (or L2) verification
+  //   "L1"           — user came from Buy at L1; waiting for L2 verification
   const [stepUpFromTier, setStepUpFromTier] = useState<"L0" | "L1" | null>(null);
 
   // Set to true when the user actively submits KYC data, so we can auto-advance
@@ -307,7 +357,20 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     }, 150);
   }, []);
 
-  // When a KYC step-up is in progress, navigate back to Buy once verification resolves
+  // Step-up completion detector.
+  //
+  // While a step-up is in progress (stepUpFromTier !== null), ExampleApp is
+  // polling kycLevel every second (see refreshKycLevel). This effect watches
+  // for the tier to advance past the starting point:
+  //
+  //   L0 step-up → done when kycLevel reaches L1 or L2
+  //   L1 step-up → done when kycLevel reaches L2
+  //
+  // We check !polling so we only act once the poll loop has settled on a final
+  // value — not while an in-flight request is still running.
+  //
+  // On completion: clear stepUpFromTier and jump straight back to Buy (step 4)
+  // so the user can immediately retry their purchase at the higher limit.
   useEffect(() => {
     if (!stepUpFromTier || polling) return;
     if (stepUpFromTier === "L0" && (kycLevel === "L1" || kycLevel === "L2")) {
@@ -1591,6 +1654,19 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
               )}
             </Button>
 
+            {/* KYC step-up CTA — shown instead of (the now-disabled) Review button
+                when the amount exceeds the current tier's limit and the user has
+                room to verify further (L0 or L1). L2 users are at the max tier
+                so no step-up is offered.
+
+                On click:
+                  1. Record the current tier in stepUpFromTier so the completion
+                     effect knows when to return.
+                  2. Navigate to the KYC screen (step 1) in step-up mode.
+                  3. The KYC screen renders the appropriate form:
+                       L0 → SSN + DOB form (submitKycInfo → polls to L1)
+                       L1 → Verify Documents button (verifyDocuments → polls to L2)
+                  4. Once verified, the useEffect above fires goTo(4) automatically. */}
             {exceedsLimit && !loadingLimits && (currentKycTier === "L0" || currentKycTier === "L1") && (
               <Button
                 variant="outlined"
