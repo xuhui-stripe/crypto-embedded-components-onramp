@@ -69,7 +69,8 @@ app.post("/api/link_auth_intent", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Error creating link auth intent:", JSON.stringify(error));
-    res.status(error.status).send({ error: error.message });
+    const status = error?.response?.status || 500;
+    res.status(status).send({ error: error.message });
   }
 });
 
