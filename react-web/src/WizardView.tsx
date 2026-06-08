@@ -68,6 +68,7 @@ export type WizardViewProps = {
   ) => void;
   onRefreshKycLevel: () => void;
   authenticating: boolean;
+  currentKycTier: "L0" | "L1" | "L2" | null;
   log: (event: string, detail?: string) => void;
 };
 
@@ -102,6 +103,9 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     cryptoCustomerId,
     selectedWallet,
     selectedWalletNetwork,
+    kycLevel,
+    currentKycTier,
+    polling,
   } = props;
 
   const KYC_CHIP: Record<string, { color: string; label: string }> = {
@@ -175,6 +179,9 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
 
   // Step 3: track which payment method types the user selected
   const [collectedPaymentTypes, setCollectedPaymentTypes] = useState<string[]>([]);
+
+  // KYC step-up: tier the user was at when they triggered the step-up from Buy screen
+  const [stepUpFromTier, setStepUpFromTier] = useState<"L0" | "L1" | null>(null);
 
   // Step 4: Buy — transaction limits (fetched in parallel when the step loads)
   const [transactionLimits, setTransactionLimits] = useState<{
@@ -292,6 +299,18 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
       setFade(true);
     }, 150);
   }, []);
+
+  // When a KYC step-up is in progress, navigate back to Buy once verification resolves
+  useEffect(() => {
+    if (!stepUpFromTier || polling) return;
+    if (stepUpFromTier === "L0" && (kycLevel === "L1" || kycLevel === "L2")) {
+      setStepUpFromTier(null);
+      goTo(4);
+    } else if (stepUpFromTier === "L1" && kycLevel === "L2") {
+      setStepUpFromTier(null);
+      goTo(4);
+    }
+  }, [stepUpFromTier, polling, kycLevel, goTo]);
 
   // Auto-advance past login once authenticated and modal is dismissed
   const prevCustomerId = useRef(props.cryptoCustomerId);
@@ -633,6 +652,17 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 ))}
               </TextField>
             )}
+            {stepUpFromTier && (
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Button
+                  size="small"
+                  onClick={() => { setStepUpFromTier(null); goTo(4); }}
+                  sx={{ color: colors.accent, textTransform: "none", fontSize: "0.8rem", p: 0, minWidth: 0 }}
+                >
+                  ← Back to Buy
+                </Button>
+              </Stack>
+            )}
             <Box>
               <Typography
                 sx={{
@@ -642,7 +672,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                   mb: 0.5,
                 }}
               >
-                Verify Your Identity
+                {stepUpFromTier ? "Verify Your Identity (unlock higher limits)" : "Verify Your Identity"}
               </Typography>
               <Stack direction="row" alignItems="center" spacing={1}>
                 <Chip
@@ -1523,7 +1553,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                   setBuySubStep("confirm");
                 }
               }}
-              disabled={props.loading || !isAmountValid}
+              disabled={props.loading || !isAmountValid || exceedsLimit}
               fullWidth
               sx={{ ...accentButtonSx, fontSize: "1rem" }}
             >
@@ -1533,6 +1563,27 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 "Review"
               )}
             </Button>
+
+            {exceedsLimit && !loadingLimits && (currentKycTier === "L0" || currentKycTier === "L1") && (
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  setStepUpFromTier(currentKycTier);
+                  goTo(1);
+                }}
+                fullWidth
+                sx={{
+                  borderColor: colors.accent,
+                  color: colors.accent,
+                  textTransform: "none",
+                  fontWeight: 600,
+                  fontSize: "0.95rem",
+                  "&:hover": { borderColor: colors.accentLight, color: colors.accentLight },
+                }}
+              >
+                {currentKycTier === "L0" ? "Provide SSN & Date of Birth to unlock higher limits" : "Verify ID documents to unlock higher limits"}
+              </Button>
+            )}
           </Stack>
         );
       }

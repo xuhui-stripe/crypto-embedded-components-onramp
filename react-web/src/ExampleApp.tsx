@@ -115,6 +115,7 @@ const ExampleAppInner: React.FC<{
     () => new URLSearchParams(window.location.search).get("lai") ?? null,
   );
   const [kycLevel, setKYCLevel] = useState<KycLevel>("REQUIRES_KYC");
+  const [currentKycTier, setCurrentKycTier] = useState<"L0" | "L1" | "L2" | null>(null);
   const [kycRegion, setKycRegion] = useState<KycRegion>(null);
   const [providedFields, setProvidedFields] = useState<string[]>([]);
   const [cryptoCustomerId, setCryptoCustomerId] = useState<
@@ -201,6 +202,9 @@ const ExampleAppInner: React.FC<{
           }
           log(`KYC Level: ${level}${json.kyc_region ? `, Region: ${json.kyc_region}` : ""}`);
           setKYCLevel(level);
+          if (level === "L0" || level === "L1" || level === "L2") {
+            setCurrentKycTier(level);
+          }
           if (terminalStates.has(level)) break;
           if (level === "PENDING" && json.kyc_region === "eu") break;
           if (Date.now() >= deadline) {
@@ -751,6 +755,7 @@ const ExampleAppInner: React.FC<{
               }
             }}
             authenticating={!!authenticationElement}
+            currentKycTier={currentKycTier}
             log={log}
           />
         ) : (
