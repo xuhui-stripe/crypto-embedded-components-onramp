@@ -23,6 +23,7 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Dayjs } from "dayjs";
 import type { KycInfo, CryptoNetwork, OnrampCoordinator } from "@stripe/crypto";
 import { getTheme } from "./theme";
+import { LOCAL_LIMITS } from "./kycLimits";
 import { EXPLORER_URLS, getNetworks, isEuCountry, EU_COUNTRIES } from "./shared";
 import { EU_COUNTRY_NAMES } from "./euIdentifiers";
 import type { AccountStatus, KycLevel, KycRegion, Wallet, OnrampSession } from "./types";
@@ -69,6 +70,7 @@ export type WizardViewProps = {
   onRefreshKycLevel: () => void;
   authenticating: boolean;
   currentKycTier: "L0" | "L1" | "L2" | null;
+  limitSource: "api" | "local";
   log: (event: string, detail?: string) => void;
 };
 
@@ -106,6 +108,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     kycLevel,
     currentKycTier,
     polling,
+    limitSource,
   } = props;
 
   const KYC_CHIP: Record<string, { color: string; label: string }> = {
@@ -182,6 +185,10 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
 
   // KYC step-up: tier the user was at when they triggered the step-up from Buy screen
   const [stepUpFromTier, setStepUpFromTier] = useState<"L0" | "L1" | null>(null);
+
+  // Set to true when the user actively submits KYC data, so we can auto-advance
+  // to the next step once polling resolves (distinct from post-auth polling).
+  const kycJustSubmitted = useRef(false);
 
   // Step 4: Buy — transaction limits (fetched in parallel when the step loads)
   const [transactionLimits, setTransactionLimits] = useState<{
@@ -312,6 +319,16 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     }
   }, [stepUpFromTier, polling, kycLevel, goTo]);
 
+  // After the user submits KYC data and polling resolves to a verified tier,
+  // auto-advance to the Wallet step (normal flow only — step-up uses goTo(4) above).
+  useEffect(() => {
+    if (!kycJustSubmitted.current || polling || step !== 1) return;
+    if (kycLevel === "L0" || kycLevel === "L1" || kycLevel === "L2") {
+      kycJustSubmitted.current = false;
+      if (!stepUpFromTier) goTo(2);
+    }
+  }, [polling, kycLevel, step, stepUpFromTier, goTo]);
+
   // Auto-advance past login once authenticated and modal is dismissed
   const prevCustomerId = useRef(props.cryptoCustomerId);
   useEffect(() => {
@@ -355,7 +372,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   // Fetch transaction limits when entering the Buy step, in parallel with any
   // other loading the step does.
   useEffect(() => {
-    if (step !== 4 || !linkAuthIntentId) return;
+    if (step !== 4 || !linkAuthIntentId || limitSource === "local") return;
     setTransactionLimits(null);
     setLoadingLimits(true);
     const qs = new URLSearchParams({ lai: linkAuthIntentId, livemode: String(livemode) });
@@ -369,7 +386,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
       })
       .catch((e) => log("Transaction limits fetch failed", e?.message || String(e)))
       .finally(() => setLoadingLimits(false));
-  }, [step, linkAuthIntentId, livemode, selectedWallet, selectedWalletNetwork, log]);
+  }, [step, linkAuthIntentId, livemode, selectedWallet, selectedWalletNetwork, limitSource, log]);
 
   // ─── Poll checkout ────────────────────────────────────
 
@@ -415,8 +432,14 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const rawLimits = isBankOnly
     ? (usdFiat?.us_bank_account ?? [])
     : (usdFiat?.card ?? []);
-  const limitDollars = rawLimits[0] ? rawLimits[0].limit / 100 : null;
-  const limitLabel = isBankOnly ? "Bank limit" : "Card limit";
+  const apiLimitDollars = rawLimits[0] ? rawLimits[0].limit / 100 : null;
+  const localLimitDollars =
+    currentKycTier ? LOCAL_LIMITS[currentKycTier].limit : null;
+  const limitDollars =
+    limitSource === "local" ? localLimitDollars : apiLimitDollars;
+  const limitLabel = limitSource === "local"
+    ? "Limit (local config)"
+    : isBankOnly ? "Bank limit" : "Card limit";
   const exceedsLimit = limitDollars !== null && parseFloat(amount) > limitDollars;
   const canNext = (s: number) => {
     switch (s) {
@@ -625,7 +648,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
           // US selected — fall through to US form below, but show country selector
         }
 
-        const chip = KYC_CHIP[props.kycLevel];
+        const chip = KYC_CHIP[props.polling ? "PENDING" : props.kycLevel] ?? KYC_CHIP.REQUIRES_KYC;
         const showFull =
           props.kycLevel === "REQUIRES_KYC" || props.kycLevel === "REJECTED";
         const showStepUp = props.kycLevel === "L0";
@@ -842,6 +865,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 <Button
                   variant="contained"
                   onClick={() => {
+                    kycJustSubmitted.current = true;
                     if (showStepUp) {
                       props.onSubmitKycInfo({
                         ...(parsedDob && { date_of_birth: parsedDob }),
@@ -900,7 +924,10 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
             {showVerify && !props.polling && (
               <Button
                 variant="contained"
-                onClick={props.onVerifyDocuments}
+                onClick={() => {
+                  kycJustSubmitted.current = true;
+                  props.onVerifyDocuments();
+                }}
                 disabled={props.loading}
                 fullWidth
                 sx={{
