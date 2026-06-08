@@ -110,6 +110,7 @@ export const EuKycStep: React.FC<EuKycStepProps> = (props) => {
 
   // Attestation
   const attestationRef = useRef<HTMLDivElement>(null);
+  const [attestationMounted, setAttestationMounted] = useState(false);
 
 
   const { kycLevel, providedFields, onComplete } = props;
@@ -248,6 +249,8 @@ export const EuKycStep: React.FC<EuKycStepProps> = (props) => {
       );
       if (attestationRef.current) {
         attestationRef.current.replaceChildren(element);
+        setAttestationMounted(true);
+        setSubmitting(false);
       }
     } catch (e: any) {
       props.setError(`Attestation error: ${e?.message || e}`);
@@ -609,16 +612,25 @@ export const EuKycStep: React.FC<EuKycStepProps> = (props) => {
           <Typography sx={{ color: colors.textSecondary, fontSize: "0.85rem" }}>
             Review and accept the Terms of Service to continue.
           </Typography>
-          <Box ref={attestationRef} sx={{ minHeight: 200 }} />
-          <Button
-            variant="contained"
-            onClick={handleAttestation}
-            disabled={submitting}
-            fullWidth
-            sx={accentButtonSx}
-          >
-            {submitting ? <CircularProgress size={20} sx={{ color: "#fff" }} /> : "Present Terms of Service"}
-          </Button>
+          <Box
+            ref={attestationRef}
+            sx={{
+              minHeight: attestationMounted ? undefined : 200,
+              width: "100%",
+              "& iframe": { border: "none", width: "100%", minHeight: 300 },
+            }}
+          />
+          {!attestationMounted && (
+            <Button
+              variant="contained"
+              onClick={handleAttestation}
+              disabled={submitting}
+              fullWidth
+              sx={accentButtonSx}
+            >
+              {submitting ? <CircularProgress size={20} sx={{ color: "#fff" }} /> : "Present Terms of Service"}
+            </Button>
+          )}
         </Stack>
       )}
 
