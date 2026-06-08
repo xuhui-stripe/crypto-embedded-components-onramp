@@ -166,7 +166,7 @@ const ExampleAppInner: React.FC<{
   );
 
   const refreshKycLevel = useCallback(
-    async (customerId: string, lai: string) => {
+    async (customerId: string, lai: string, previousLevel?: string) => {
       const terminalStates = new Set([
         "REQUIRES_KYC",
         "L0",
@@ -176,6 +176,10 @@ const ExampleAppInner: React.FC<{
       ]);
       const POLL_TIMEOUT_MS = 2 * 60 * 1000;
       const deadline = Date.now() + POLL_TIMEOUT_MS;
+      // After submitting KYC data, Stripe may take a moment to transition tiers
+      // to "pending". Allow up to 3 grace polls at the same level before treating
+      // a terminal state as stable (avoids stopping early due to the race window).
+      let gracePolls = previousLevel ? 3 : 0;
       setPolling(true);
       setError(null);
       log("Polling KYC level...");
@@ -205,7 +209,12 @@ const ExampleAppInner: React.FC<{
           if (level === "L0" || level === "L1" || level === "L2") {
             setCurrentKycTier(level);
           }
-          if (terminalStates.has(level)) break;
+          // Level changed from previous: no need for grace polls anymore
+          if (previousLevel && level !== previousLevel) gracePolls = 0;
+          if (terminalStates.has(level)) {
+            if (gracePolls <= 0) break;
+            gracePolls--;
+          }
           if (level === "PENDING" && json.kyc_region === "eu") break;
           if (Date.now() >= deadline) {
             log("KYC polling timed out after 2 minutes");
@@ -360,7 +369,7 @@ const ExampleAppInner: React.FC<{
         await onramp.submitKycInfo(info);
         log("KYC submit result", "success");
         if (cryptoCustomerId && linkAuthIntentId) {
-          await refreshKycLevel(cryptoCustomerId, linkAuthIntentId);
+          await refreshKycLevel(cryptoCustomerId, linkAuthIntentId, kycLevel);
         }
       } catch (e) {
         surfaceError("KYC submission error", e);
@@ -373,6 +382,7 @@ const ExampleAppInner: React.FC<{
       onramp,
       cryptoCustomerId,
       linkAuthIntentId,
+      kycLevel,
       refreshKycLevel,
       surfaceError,
     ],
@@ -449,7 +459,7 @@ const ExampleAppInner: React.FC<{
       const result = await onramp.verifyDocuments();
       log("Verify documents result", result.result);
       if (cryptoCustomerId && linkAuthIntentId) {
-        await refreshKycLevel(cryptoCustomerId, linkAuthIntentId);
+        await refreshKycLevel(cryptoCustomerId, linkAuthIntentId, kycLevel);
       }
     } catch (e) {
       surfaceError("Identity verification error", e);
@@ -459,6 +469,7 @@ const ExampleAppInner: React.FC<{
   }, [
     cryptoCustomerId,
     linkAuthIntentId,
+    kycLevel,
     log,
     onramp,
     refreshKycLevel,
