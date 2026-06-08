@@ -183,6 +183,10 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   // KYC step-up: tier the user was at when they triggered the step-up from Buy screen
   const [stepUpFromTier, setStepUpFromTier] = useState<"L0" | "L1" | null>(null);
 
+  // Set to true when the user actively submits KYC data, so we can auto-advance
+  // to the next step once polling resolves (distinct from post-auth polling).
+  const kycJustSubmitted = useRef(false);
+
   // Step 4: Buy — transaction limits (fetched in parallel when the step loads)
   const [transactionLimits, setTransactionLimits] = useState<{
     object: string;
@@ -311,6 +315,16 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
       goTo(4);
     }
   }, [stepUpFromTier, polling, kycLevel, goTo]);
+
+  // After the user submits KYC data and polling resolves to a verified tier,
+  // auto-advance to the Wallet step (normal flow only — step-up uses goTo(4) above).
+  useEffect(() => {
+    if (!kycJustSubmitted.current || polling || step !== 1) return;
+    if (kycLevel === "L0" || kycLevel === "L1" || kycLevel === "L2") {
+      kycJustSubmitted.current = false;
+      if (!stepUpFromTier) goTo(2);
+    }
+  }, [polling, kycLevel, step, stepUpFromTier, goTo]);
 
   // Auto-advance past login once authenticated and modal is dismissed
   const prevCustomerId = useRef(props.cryptoCustomerId);
@@ -625,7 +639,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
           // US selected — fall through to US form below, but show country selector
         }
 
-        const chip = KYC_CHIP[props.kycLevel];
+        const chip = KYC_CHIP[props.polling ? "PENDING" : props.kycLevel] ?? KYC_CHIP.REQUIRES_KYC;
         const showFull =
           props.kycLevel === "REQUIRES_KYC" || props.kycLevel === "REJECTED";
         const showStepUp = props.kycLevel === "L0";
@@ -842,6 +856,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 <Button
                   variant="contained"
                   onClick={() => {
+                    kycJustSubmitted.current = true;
                     if (showStepUp) {
                       props.onSubmitKycInfo({
                         ...(parsedDob && { date_of_birth: parsedDob }),
@@ -900,7 +915,10 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
             {showVerify && !props.polling && (
               <Button
                 variant="contained"
-                onClick={props.onVerifyDocuments}
+                onClick={() => {
+                  kycJustSubmitted.current = true;
+                  props.onVerifyDocuments();
+                }}
                 disabled={props.loading}
                 fullWidth
                 sx={{
