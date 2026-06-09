@@ -70,6 +70,7 @@ export type WizardViewProps = {
   onRefreshKycLevel: () => void;
   authenticating: boolean;
   currentKycTier: "L0" | "L1" | "L2" | null;
+  kycTiers: Array<{ tier: string; verification_status: string }>;
   limitSource: "api" | "local";
   log: (event: string, detail?: string) => void;
 };
@@ -95,7 +96,9 @@ export type WizardViewProps = {
  *                                                  L1 → Verify Documents
  *
  * KYC screen content (step 1) by kycLevel:
- *   REQUIRES_KYC / REJECTED → full L0 form (name, address, optional SSN/DOB)
+ *   REQUIRES_KYC            → full L0 form (name, address, optional SSN/DOB)
+ *   REJECTED + L1 verified  → document verification button (retry L2 docs)
+ *   REJECTED + L1 failed    → full L0 form (name, address, optional SSN/DOB)
  *   L0                      → L1 step-up form (SSN + DOB required)
  *   L1                      → L2 document verification button
  *   L2                      → already fully verified, Next enabled
@@ -142,6 +145,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     selectedWalletNetwork,
     kycLevel,
     currentKycTier,
+    kycTiers,
     polling,
     limitSource,
   } = props;
@@ -704,10 +708,19 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         }
 
         const chip = KYC_CHIP[props.polling ? "PENDING" : props.kycLevel] ?? KYC_CHIP.REQUIRES_KYC;
+        // When REJECTED, check whether L1 was previously verified.
+        // If yes, only L2 (doc verification) failed — let the user retry docs.
+        // If no, L1 data itself was rejected — show the full data collection form.
+        const l1Verified = kycTiers.some(
+          (t) => t.tier === "l1" && t.verification_status === "verified",
+        );
         const showFull =
-          props.kycLevel === "REQUIRES_KYC" || props.kycLevel === "REJECTED";
+          props.kycLevel === "REQUIRES_KYC" ||
+          (props.kycLevel === "REJECTED" && !l1Verified);
         const showStepUp = props.kycLevel === "L0";
-        const showVerify = props.kycLevel === "L1";
+        const showVerify =
+          props.kycLevel === "L1" ||
+          (props.kycLevel === "REJECTED" && l1Verified);
 
         return (
           <Stack spacing={3}>
