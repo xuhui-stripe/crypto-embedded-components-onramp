@@ -504,16 +504,8 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     switch (s) {
       case 0:
         return !!props.cryptoCustomerId;
-      case 1: {
-        if (["L0", "L1", "L2"].includes(props.kycLevel)) return true;
-        // REJECTED + L1 verified means only L2 docs failed; L1 is still usable
-        if (props.kycLevel === "REJECTED") {
-          return kycTiers.some(
-            (t) => t.tier === "l1" && t.verification_status === "verified",
-          );
-        }
-        return false;
-      }
+      case 1:
+        return ["L0", "L1", "L2"].includes(props.kycLevel);
       case 2:
         return !!props.selectedWallet;
       case 3:
