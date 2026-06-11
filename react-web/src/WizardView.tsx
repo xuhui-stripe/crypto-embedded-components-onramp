@@ -714,13 +714,17 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         const l1Verified = kycTiers.some(
           (t) => t.tier === "l1" && t.verification_status === "verified",
         );
+        const l1NotAvailable = kycTiers.some(
+          (t) => t.tier === "l1" && t.verification_status === "not_available",
+        );
         const showFull =
           props.kycLevel === "REQUIRES_KYC" ||
-          (props.kycLevel === "REJECTED" && !l1Verified);
+          (props.kycLevel === "REJECTED" && !l1Verified && !l1NotAvailable);
         const showStepUp = props.kycLevel === "L0";
         const showVerify =
           props.kycLevel === "L1" ||
-          (props.kycLevel === "REJECTED" && l1Verified);
+          (props.kycLevel === "REJECTED" && l1Verified) ||
+          (props.kycLevel === "REJECTED" && l1NotAvailable);
 
         return (
           <Stack spacing={3}>
