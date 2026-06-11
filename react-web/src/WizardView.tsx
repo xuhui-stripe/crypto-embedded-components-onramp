@@ -70,6 +70,7 @@ export type WizardViewProps = {
   onRefreshKycLevel: () => void;
   authenticating: boolean;
   currentKycTier: "L0" | "L1" | "L2" | null;
+  kycTiers: Array<{ tier: string; verification_status: string }>;
   limitSource: "api" | "local";
   log: (event: string, detail?: string) => void;
 };
@@ -95,7 +96,9 @@ export type WizardViewProps = {
  *                                                  L1 → Verify Documents
  *
  * KYC screen content (step 1) by kycLevel:
- *   REQUIRES_KYC / REJECTED → full L0 form (name, address, optional SSN/DOB)
+ *   REQUIRES_KYC            → full L0 form (name, address, optional SSN/DOB)
+ *   REJECTED + L1 verified  → document verification button (retry L2 docs)
+ *   REJECTED + L1 failed    → full L0 form (name, address, optional SSN/DOB)
  *   L0                      → L1 step-up form (SSN + DOB required)
  *   L1                      → L2 document verification button
  *   L2                      → already fully verified, Next enabled
@@ -142,6 +145,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     selectedWalletNetwork,
     kycLevel,
     currentKycTier,
+    kycTiers,
     polling,
     limitSource,
   } = props;
@@ -704,10 +708,32 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         }
 
         const chip = KYC_CHIP[props.polling ? "PENDING" : props.kycLevel] ?? KYC_CHIP.REQUIRES_KYC;
+
+        // Inspect the L1 tier status to decide which sub-form to show when REJECTED.
+        // l1Verified: L1 passed; only L2 (doc check) failed → retry docs, not re-enter data.
+        const l1Verified = kycTiers.some(
+          (t) => t.tier === "l1" && t.verification_status === "verified",
+        );
+        // l1NotAvailable: EU region users skip L0 and L1 entirely — both tiers are
+        // not_available. When REJECTED, there is no L1 data to re-enter, so go straight
+        // to the document verification button to retry L2.
+        const l1NotAvailable = kycTiers.some(
+          (t) => t.tier === "l1" && t.verification_status === "not_available",
+        );
+
+        // Full L0 form (name, address, optional SSN/DOB): new users, or REJECTED where L1
+        // itself failed (l1 was rejected/not_started, not verified or not_available).
         const showFull =
-          props.kycLevel === "REQUIRES_KYC" || props.kycLevel === "REJECTED";
+          props.kycLevel === "REQUIRES_KYC" ||
+          (props.kycLevel === "REJECTED" && !l1Verified && !l1NotAvailable);
+        // L1 step-up form (SSN + DOB required to advance from L0 → L1).
         const showStepUp = props.kycLevel === "L0";
-        const showVerify = props.kycLevel === "L1";
+        // Document verification button: user is at L1, or REJECTED but L1 was already
+        // verified or not_available (EU region) — only the L2 doc step needs to be retried.
+        const showVerify =
+          props.kycLevel === "L1" ||
+          (props.kycLevel === "REJECTED" && l1Verified) ||
+          (props.kycLevel === "REJECTED" && l1NotAvailable);
 
         return (
           <Stack spacing={3}>

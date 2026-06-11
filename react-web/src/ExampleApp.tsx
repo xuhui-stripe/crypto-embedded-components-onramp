@@ -116,6 +116,7 @@ const ExampleAppInner: React.FC<{
   );
   const [kycLevel, setKYCLevel] = useState<KycLevel>("REQUIRES_KYC");
   const [currentKycTier, setCurrentKycTier] = useState<"L0" | "L1" | "L2" | null>(null);
+  const [kycTiers, setKycTiers] = useState<Array<{ tier: string; verification_status: string }>>([]);
   const [limitSource, setLimitSource] = useState<"api" | "local">("api");
   const [kycRegion, setKycRegion] = useState<KycRegion>(null);
   const [providedFields, setProvidedFields] = useState<string[]>([]);
@@ -204,6 +205,9 @@ const ExampleAppInner: React.FC<{
           }
           if (json.provided_fields) {
             setProvidedFields(json.provided_fields);
+          }
+          if (json.kyc_tiers) {
+            setKycTiers(json.kyc_tiers);
           }
           log(`KYC Level: ${level}${json.kyc_region ? `, Region: ${json.kyc_region}` : ""}`);
           setKYCLevel(level);
@@ -788,6 +792,7 @@ const ExampleAppInner: React.FC<{
             }}
             authenticating={!!authenticationElement}
             currentKycTier={currentKycTier}
+            kycTiers={kycTiers}
             limitSource={limitSource}
             log={log}
           />
