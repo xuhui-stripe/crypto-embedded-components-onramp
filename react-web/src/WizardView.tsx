@@ -714,7 +714,9 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         const l1Verified = kycTiers.some(
           (t) => t.tier === "l1" && t.verification_status === "verified",
         );
-        // l1NotAvailable: L1 tier doesn't apply (e.g. region skips L1) → go straight to docs.
+        // l1NotAvailable: EU region users skip L0 and L1 entirely — both tiers are
+        // not_available. When REJECTED, there is no L1 data to re-enter, so go straight
+        // to the document verification button to retry L2.
         const l1NotAvailable = kycTiers.some(
           (t) => t.tier === "l1" && t.verification_status === "not_available",
         );
@@ -727,7 +729,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         // L1 step-up form (SSN + DOB required to advance from L0 → L1).
         const showStepUp = props.kycLevel === "L0";
         // Document verification button: user is at L1, or REJECTED but L1 was already
-        // verified/not_applicable — only the L2 doc step needs to be retried.
+        // verified or not_available (EU region) — only the L2 doc step needs to be retried.
         const showVerify =
           props.kycLevel === "L1" ||
           (props.kycLevel === "REJECTED" && l1Verified) ||
