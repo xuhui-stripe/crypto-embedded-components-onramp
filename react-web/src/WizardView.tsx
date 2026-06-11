@@ -708,19 +708,26 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         }
 
         const chip = KYC_CHIP[props.polling ? "PENDING" : props.kycLevel] ?? KYC_CHIP.REQUIRES_KYC;
-        // When REJECTED, check whether L1 was previously verified.
-        // If yes, only L2 (doc verification) failed — let the user retry docs.
-        // If no, L1 data itself was rejected — show the full data collection form.
+
+        // Inspect the L1 tier status to decide which sub-form to show when REJECTED.
+        // l1Verified: L1 passed; only L2 (doc check) failed → retry docs, not re-enter data.
         const l1Verified = kycTiers.some(
           (t) => t.tier === "l1" && t.verification_status === "verified",
         );
+        // l1NotAvailable: L1 tier doesn't apply (e.g. region skips L1) → go straight to docs.
         const l1NotAvailable = kycTiers.some(
           (t) => t.tier === "l1" && t.verification_status === "not_available",
         );
+
+        // Full L0 form (name, address, optional SSN/DOB): new users, or REJECTED where L1
+        // itself failed (l1 was rejected/not_started, not verified or not_available).
         const showFull =
           props.kycLevel === "REQUIRES_KYC" ||
           (props.kycLevel === "REJECTED" && !l1Verified && !l1NotAvailable);
+        // L1 step-up form (SSN + DOB required to advance from L0 → L1).
         const showStepUp = props.kycLevel === "L0";
+        // Document verification button: user is at L1, or REJECTED but L1 was already
+        // verified/not_applicable — only the L2 doc step needs to be retried.
         const showVerify =
           props.kycLevel === "L1" ||
           (props.kycLevel === "REJECTED" && l1Verified) ||
