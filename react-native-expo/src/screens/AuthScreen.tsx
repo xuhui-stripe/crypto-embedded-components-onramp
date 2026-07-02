@@ -6,7 +6,7 @@ import {
 import { useOnramp } from '../hooks/useOnramp';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
-import { signup, login, createAuthIntent, saveUser, getCryptoCustomer } from '../api/client';
+import { signup, login, createAuthIntent, saveUser, getCryptoCustomer, deriveCurrentTier } from '../api/client';
 import { MERCHANT_DISPLAY_NAME } from '../constants';
 import { useSettings } from '../context/SettingsContext';
 
@@ -100,32 +100,62 @@ export default function AuthScreen({ navigation }: Props) {
       // the collection screens regardless of the tier setting.
       const customerRes = await getCryptoCustomer(authResult.customerId, authToken);
 
-      if (customerRes.success && customerRes.data.kycStatus === 'verified') {
-        // Customer already completed KYC in a previous session — go straight
-        // to the wallet selection screen.
-        const idResult = await verifyIdentity();
-        if (idResult?.error) {
-          console.log('Identity verification note:', idResult.error.message);
+      if (customerRes.success) {
+        // Derive kyc_level from kyc_tiers using the same logic as the server.
+        const kycTiers = customerRes.data.kycTiers ?? [];
+        const INACTIVE = new Set(['not_available', 'not_started']);
+        const ATTEMPTED = new Set(['pending', 'rejected', 'verified']);
+        const statusOf = (tier: string) =>
+          kycTiers.find(t => t.tier === tier)?.verification_status ?? 'not_started';
+
+        let kyc_level: string;
+        if (kycTiers.some(t => t.verification_status === 'pending')) {
+          kyc_level = 'PENDING';
+        } else if (kycTiers.every(t => INACTIVE.has(t.verification_status))) {
+          kyc_level = 'REQUIRES_KYC';
+        } else {
+          const currentTier = deriveCurrentTier(kycTiers);
+          const currentStatus = statusOf(currentTier);
+          if (currentStatus === 'verified') {
+            kyc_level = currentTier === 'l2' ? 'L2' : currentTier === 'l1' ? 'L1' : 'L0';
+          } else if (currentStatus === 'rejected') {
+            kyc_level = 'REJECTED';
+          } else {
+            kyc_level = 'REQUIRES_KYC';
+          }
         }
-        navigation.navigate('Wallet', {
-          customerId: authResult.customerId,
-          authToken,
-        });
-      } else if (settings.kycTier === 'L0') {
-        // L0 demo: deliberately skip identity collection. The user will have
-        // the lowest transaction limits and will be shown the KYC step-up
-        // screen if they attempt a purchase above those limits.
-        navigation.navigate('Wallet', {
-          customerId: authResult.customerId,
-          authToken,
-        });
+
+        if (kyc_level === 'L0' || kyc_level === 'L1' || kyc_level === 'L2') {
+          // Already verified at some tier — go straight to the wallet screen.
+          const idResult = await verifyIdentity();
+          if (idResult?.error) {
+            console.log('Identity verification note:', idResult.error.message);
+          }
+          navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
+        } else if (kyc_level === 'PENDING') {
+          // Verification submitted and under review — proceed to wallet.
+          navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
+        } else if (kyc_level === 'REJECTED') {
+          // Prior KYC attempt was rejected — re-enter the collection flow.
+          navigation.navigate('KYCPrimer', { customerId: authResult.customerId, authToken });
+        } else {
+          // REQUIRES_KYC: no active tier yet. Apply settings.kycTier.
+          // If settings.kycTier is greater than the current tier (l0),
+          // route through the KYC collection flow; otherwise skip it.
+          if (settings.kycTier === 'L0') {
+            navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
+          } else {
+            // L1 or L2: proceed through the standard KYC collection flow.
+            navigation.navigate('KYCPrimer', { customerId: authResult.customerId, authToken });
+          }
+        }
       } else {
-        // L1 or L2: proceed through the standard KYC collection flow.
-        // The AddressScreen will conditionally call verifyIdentity() for L2.
-        navigation.navigate('KYCPrimer', {
-          customerId: authResult.customerId,
-          authToken,
-        });
+        // Could not fetch customer KYC state — fall back to settings-based routing.
+        if (settings.kycTier === 'L0') {
+          navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
+        } else {
+          navigation.navigate('KYCPrimer', { customerId: authResult.customerId, authToken });
+        }
       }
     } catch (err: any) {
       Alert.alert('Error', err.message ?? 'Something went wrong.');
