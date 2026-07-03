@@ -23,7 +23,7 @@ router.get('/crypto_customer/:customerId', async (req: Request, res: Response) =
 
     if (!response.ok) {
       console.error('[stripe] get crypto customer failed:', JSON.stringify(data.error ?? data));
-      return res.status(500).json({ error: toUserError(data) });
+      return res.status(response.status).json({ error: toUserError(data) });
     }
 
     const kycTiers: Array<{ tier: string; verification_status: string }> = data.kyc_tiers ?? [];
