@@ -37,10 +37,11 @@ export interface KycTierEntry {
 
 export interface CryptoCustomerResponse {
   customerId: string;
-  providedFields: string[];
-  kycStatus: string;
-  idDocStatus: string;
+  kyc_level: string;
+  kyc_region: string | null;
   kycTiers: KycTierEntry[];
+  verifications: Array<{ name: string; status: string; errors: string[] }>;
+  provided_fields: string[];
 }
 
 /**

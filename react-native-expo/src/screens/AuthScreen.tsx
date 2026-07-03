@@ -6,7 +6,7 @@ import {
 import { useOnramp } from '../hooks/useOnramp';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
-import { signup, login, createAuthIntent, saveUser, getCryptoCustomer, deriveCurrentTier } from '../api/client';
+import { signup, login, createAuthIntent, saveUser, getCryptoCustomer } from '../api/client';
 import { MERCHANT_DISPLAY_NAME } from '../constants';
 import { useSettings } from '../context/SettingsContext';
 
@@ -101,39 +101,10 @@ export default function AuthScreen({ navigation }: Props) {
       const customerRes = await getCryptoCustomer(authResult.customerId, authToken);
 
       if (customerRes.success) {
-        // Derive kyc_level from kyc_tiers using the same logic as the server.
-        const kycTiers = customerRes.data.kycTiers ?? [];
-        const INACTIVE = new Set(['not_available', 'not_started']);
-        const ATTEMPTED = new Set(['pending', 'rejected', 'verified']);
-        const statusOf = (tier: string) =>
-          kycTiers.find(t => t.tier === tier)?.verification_status ?? 'not_started';
+        const { kyc_level } = customerRes.data;
 
-        let kyc_level: string;
-        if (kycTiers.some(t => t.verification_status === 'pending')) {
-          kyc_level = 'PENDING';
-        } else if (kycTiers.every(t => INACTIVE.has(t.verification_status))) {
-          kyc_level = 'REQUIRES_KYC';
-        } else {
-          const currentTier = deriveCurrentTier(kycTiers);
-          const currentStatus = statusOf(currentTier);
-          if (currentStatus === 'verified') {
-            kyc_level = currentTier === 'l2' ? 'L2' : currentTier === 'l1' ? 'L1' : 'L0';
-          } else if (currentStatus === 'rejected') {
-            kyc_level = 'REJECTED';
-          } else {
-            kyc_level = 'REQUIRES_KYC';
-          }
-        }
-
-        if (kyc_level === 'L0' || kyc_level === 'L1' || kyc_level === 'L2') {
-          // Already verified at some tier — go straight to the wallet screen.
-          const idResult = await verifyIdentity();
-          if (idResult?.error) {
-            console.log('Identity verification note:', idResult.error.message);
-          }
-          navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
-        } else if (kyc_level === 'PENDING') {
-          // Verification submitted and under review — proceed to wallet.
+        if (kyc_level === 'L0' || kyc_level === 'L1' || kyc_level === 'L2' || kyc_level === 'PENDING') {
+          // Already verified (or verification under review) — go straight to wallet.
           navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
         } else if (kyc_level === 'REJECTED') {
           // Prior KYC attempt was rejected — re-enter the collection flow.

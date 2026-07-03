@@ -55,11 +55,9 @@ export default function RegisterScreen({ navigation, route }: Props) {
       await saveUser(authResult.customerId, authToken);
 
       const customerRes = await getCryptoCustomer(authResult.customerId, authToken);
-      if (customerRes.success && customerRes.data.kycStatus === 'verified') {
-        const idResult = await verifyIdentity();
-        if (idResult?.error) {
-          console.log('Identity verification note:', idResult.error.message);
-        }
+      const kyc_level = customerRes.success ? customerRes.data.kyc_level : null;
+      if (kyc_level === 'L0' || kyc_level === 'L1' || kyc_level === 'L2' || kyc_level === 'PENDING') {
+        // Already verified (or under review) — go straight to wallet.
         navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
       } else {
         navigation.navigate('KYCPrimer', { customerId: authResult.customerId, authToken });

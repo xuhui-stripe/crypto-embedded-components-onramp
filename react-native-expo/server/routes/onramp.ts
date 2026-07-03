@@ -23,24 +23,47 @@ router.get('/crypto_customer/:customerId', async (req: Request, res: Response) =
 
     if (!response.ok) {
       console.error('[stripe] get crypto customer failed:', JSON.stringify(data.error ?? data));
-      return res.status(response.status).json({ error: toUserError(data) });
+      return res.status(500).json({ error: toUserError(data) });
     }
 
+    const kycTiers: Array<{ tier: string; verification_status: string }> = data.kyc_tiers ?? [];
+    const kycRegion: string | null = data.kyc_region ?? null;
     const verifications = data.verifications ?? [];
-    const kycStatus = verifications.find((v: any) => v.name === 'kyc_verified')?.status ?? 'not_started';
-    const idDocStatus = verifications.find((v: any) => v.name === 'id_document_verified')?.status ?? 'not_started';
+    const provided_fields: string[] = data.provided_fields ?? [];
 
-    // kyc_tiers is the authoritative source for determining the customer's
-    // current verification tier.
-    // Reference: https://docs.stripe.com/crypto/onramp/kyc-integration-guide
-    const kycTiers = data.kyc_tiers ?? [];
+    // Derive kyc_level from kyc_tiers.
+    // Mirrors the logic in react-web/server/index.ts GET /api/crypto/customers/:customerId.
+    const INACTIVE = new Set(['not_available', 'not_started']);
+    const ATTEMPTED = new Set(['pending', 'rejected', 'verified']);
+    const statusOf = (tier: string) =>
+      kycTiers.find(t => t.tier === tier)?.verification_status ?? 'not_started';
+
+    let kyc_level: string;
+    if (kycTiers.some(t => t.verification_status === 'pending')) {
+      kyc_level = 'PENDING';
+    } else if (kycTiers.every(t => INACTIVE.has(t.verification_status))) {
+      kyc_level = 'REQUIRES_KYC';
+    } else {
+      const currentTier =
+        ATTEMPTED.has(statusOf('l2')) ? 'l2' :
+        ATTEMPTED.has(statusOf('l1')) ? 'l1' : 'l0';
+      const currentStatus = statusOf(currentTier);
+      if (currentStatus === 'verified') {
+        kyc_level = currentTier === 'l2' ? 'L2' : currentTier === 'l1' ? 'L1' : 'L0';
+      } else if (currentStatus === 'rejected') {
+        kyc_level = 'REJECTED';
+      } else {
+        kyc_level = 'REQUIRES_KYC';
+      }
+    }
 
     res.json({
       customerId: data.id,
-      providedFields: data.provided_fields ?? [],
-      kycStatus,
-      idDocStatus,
+      kyc_level,
+      kyc_region: kycRegion,
       kycTiers,
+      verifications,
+      provided_fields,
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
