@@ -73,7 +73,7 @@ router.post('/save_user', async (req: Request, res: Response) => {
 
     record.cryptoCustomerId = crypto_customer_id;
 
-    if (record.linkAuthIntentId && !record.accessToken) {
+    if (record.linkAuthIntentId) {
       const secretKey = STRIPE_SECRET_KEY!;
       const tokenRes = await fetch(`${LINK_API}/link_auth_intent/${record.linkAuthIntentId}/tokens`, {
         method: 'POST',
