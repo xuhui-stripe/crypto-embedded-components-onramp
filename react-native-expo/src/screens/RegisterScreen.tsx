@@ -20,7 +20,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
   const { email, authToken: initialToken } = route.params;
   const [phone, setPhone] = useState('+1');
   const [loading, setLoading] = useState(false);
-  const { registerLinkUser, authorize, verifyIdentity } = useOnramp();
+  const { registerLinkUser, authorize } = useOnramp();
 
   const handleRegister = async () => {
     if (!phone.trim() || phone === '+1') {

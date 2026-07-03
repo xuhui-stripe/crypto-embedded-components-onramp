@@ -20,7 +20,7 @@ export default function AuthScreen({ navigation }: Props) {
   const [loading, setLoading] = useState(false);
   const [loadingMode, setLoadingMode] = useState<'signup' | 'login' | null>(null);
 
-  const { configure, hasLinkAccount, authorize, verifyIdentity } = useOnramp();
+  const { configure, hasLinkAccount, authorize } = useOnramp();
 
   // Read the KYC tier chosen in the Settings screen so we can route the user
   // through the appropriate identity-collection steps (or skip them for L0).
