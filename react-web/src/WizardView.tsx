@@ -5,6 +5,11 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   InputAdornment,
   Link,
@@ -284,6 +289,12 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const [sessionWalletChallenge, setSessionWalletChallenge] = useState<WalletOwnershipChallenge | null>(null);
   const [sessionWalletSig, setSessionWalletSig] = useState('');
   const [verifyingSessionWallet, setVerifyingSessionWallet] = useState(false);
+  // Pending confirmation before starting the verification flow (iOS-style alert).
+  const [pendingWalletVerifConfirm, setPendingWalletVerifConfirm] = useState<{
+    phase: 'signing_for_session' | 'signing_for_checkout';
+    walletAddress: string;
+    network: CryptoNetwork;
+  } | null>(null);
 
   // ─── Quote expiration countdown + auto-refresh ────────
 
@@ -1747,16 +1758,11 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                       const result = await props.onCheckout(session.id);
                       if (result === 'wallet_ownership_required') {
                         setBuySubStep('confirm');
-                        try {
-                          const challenge = await props.onramp.getWalletOwnershipChallenge({
-                            walletAddress: props.selectedWallet!,
-                            network: props.selectedWalletNetwork! as CryptoNetwork,
-                          });
-                          setSessionWalletChallenge(challenge);
-                          setSessionWalletVerifPhase('signing_for_checkout');
-                        } catch (e: any) {
-                          setError(e?.message ?? 'Failed to get wallet ownership challenge.');
-                        }
+                        setPendingWalletVerifConfirm({
+                          phase: 'signing_for_checkout',
+                          walletAddress: props.selectedWallet!,
+                          network: props.selectedWalletNetwork! as CryptoNetwork,
+                        });
                         return;
                       }
                       await pollSession(session.id);
@@ -1964,17 +1970,12 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 const s = await props.onAddFunds(amount, destCurrency, sourceCurrency);
                 if (s) {
                   if (s.transaction_details?.last_error === 'wallet_ownership_verification_required') {
-                    try {
-                      const challenge = await props.onramp.getWalletOwnershipChallenge({
-                        walletAddress: props.selectedWallet!,
-                        network: props.selectedWalletNetwork! as CryptoNetwork,
-                      });
-                      setSessionWalletChallenge(challenge);
-                      setSessionWalletVerifPhase('signing_for_session');
-                      setSession(s);
-                    } catch (e: any) {
-                      setError(e?.message ?? 'Failed to get wallet ownership challenge.');
-                    }
+                    setSession(s);
+                    setPendingWalletVerifConfirm({
+                      phase: 'signing_for_session',
+                      walletAddress: props.selectedWallet!,
+                      network: props.selectedWalletNetwork! as CryptoNetwork,
+                    });
                     return;
                   }
                   setSession(s);
@@ -2177,6 +2178,42 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
           {props.error}
         </Alert>
       </Snackbar>
+
+      {/* Wallet ownership verification confirmation dialog (iOS-style alert) */}
+      <Dialog
+        open={!!pendingWalletVerifConfirm}
+        onClose={() => setPendingWalletVerifConfirm(null)}
+      >
+        <DialogTitle>Wallet verification required</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This purchase requires you to verify ownership of the selected wallet before continuing.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPendingWalletVerifConfirm(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            sx={accentButtonSx}
+            onClick={async () => {
+              if (!pendingWalletVerifConfirm) return;
+              const { phase, walletAddress, network } = pendingWalletVerifConfirm;
+              setPendingWalletVerifConfirm(null);
+              try {
+                const challenge = await props.onramp.getWalletOwnershipChallenge({ walletAddress, network });
+                setSessionWalletChallenge(challenge);
+                setSessionWalletVerifPhase(phase);
+              } catch (e: any) {
+                setError(e?.message ?? 'Failed to get wallet ownership challenge.');
+              }
+            }}
+          >
+            Verify
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };
