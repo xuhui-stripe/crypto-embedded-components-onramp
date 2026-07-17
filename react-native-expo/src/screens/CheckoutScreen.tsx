@@ -3,8 +3,11 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
   ScrollView,
 } from 'react-native';
-import { Onramp } from '@stripe/stripe-react-native';
 import { useOnramp } from '../hooks/useOnramp';
+
+type _OnrampHook = ReturnType<typeof useOnramp>;
+type WalletOwnershipChallenge = Awaited<ReturnType<_OnrampHook['getWalletOwnershipChallenge']>>['challenge'];
+type CryptoNetwork = Parameters<_OnrampHook['getWalletOwnershipChallenge']>[1];
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
@@ -45,7 +48,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   // Wallet ownership verification state — triggered when checkout returns
   // wallet_ownership_verification_required.
   const [walletVerifPhase, setWalletVerifPhase] = useState<'idle' | 'signing'>('idle');
-  const [walletChallenge, setWalletChallenge] = useState<Onramp.WalletOwnershipChallenge | null>(null);
+  const [walletChallenge, setWalletChallenge] = useState<WalletOwnershipChallenge | null>(null);
   const [walletSig, setWalletSig] = useState('');
   const [verifyingWallet, setVerifyingWallet] = useState(false);
   // Captures wallet address/network from the checkout response before throwing,
@@ -145,7 +148,7 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         setChecking(false);
         setQuoteRefreshDisabled(false);
         const verifAddress = pendingVerifContextRef.current?.walletAddress ?? walletAddress;
-        const verifNetwork = (pendingVerifContextRef.current?.network ?? network) as Onramp.CryptoNetwork;
+        const verifNetwork = (pendingVerifContextRef.current?.network ?? network) as CryptoNetwork;
         pendingVerifContextRef.current = null;
         Alert.alert(
           'Wallet verification required',
