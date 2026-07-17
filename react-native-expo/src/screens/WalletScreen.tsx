@@ -19,8 +19,7 @@ import { Onramp, useOnramp } from '@stripe/stripe-react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
-import { getCustomerWallets } from '../api/client';
-import { useSettings } from '../context/SettingsContext';
+import { getCustomerWallets, getCryptoCustomer } from '../api/client';
 
 type WalletOwnershipChallenge = {
   challenge_id: string;
@@ -44,7 +43,7 @@ type Props = {
 
 export default function WalletScreen({ navigation, route }: Props) {
   const { customerId, authToken } = route.params;
-  const { settings } = useSettings();
+  const [kycRegion, setKycRegion] = useState<string | null>(null);
   const [existingWallets, setExistingWallets] = useState<ExistingWallet[]>([]);
   const [loadingWallets, setLoadingWallets] = useState(true);
   const [selectedWallet, setSelectedWallet] = useState<ExistingWallet | null>(null);
@@ -67,11 +66,17 @@ export default function WalletScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     (async () => {
-      const res = await getCustomerWallets(customerId, authToken);
-      if (res.success && res.data.data.length > 0) {
-        setExistingWallets(res.data.data);
+      const [walletsRes, customerRes] = await Promise.all([
+        getCustomerWallets(customerId, authToken),
+        getCryptoCustomer(customerId, authToken),
+      ]);
+      if (walletsRes.success && walletsRes.data.data.length > 0) {
+        setExistingWallets(walletsRes.data.data);
       } else {
         setShowAddNew(true);
+      }
+      if (customerRes.success) {
+        setKycRegion(customerRes.data.kyc_region);
       }
       setLoadingWallets(false);
     })();
@@ -99,7 +104,7 @@ export default function WalletScreen({ navigation, route }: Props) {
         Alert.alert('Error', result.error.message);
         return;
       }
-      if (settings.euRegion && getWalletOwnershipChallenge) {
+      if (kycRegion === 'eu' && getWalletOwnershipChallenge) {
         try {
           const challenge = await getWalletOwnershipChallenge(address.trim(), network);
           if (challenge?.error) {

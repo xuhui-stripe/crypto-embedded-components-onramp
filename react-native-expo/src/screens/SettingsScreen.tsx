@@ -93,9 +93,6 @@ export default function SettingsScreen({ navigation: _navigation }: Props) {
       limitSource: settings.limitSource === 'api' ? 'local' : 'api',
     });
 
-  const toggleEuRegion = () =>
-    updateSettings({ euRegion: !settings.euRegion });
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
 
@@ -230,32 +227,6 @@ export default function SettingsScreen({ navigation: _navigation }: Props) {
         </View>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* EU Region section */}
-      {/* ------------------------------------------------------------------ */}
-      <Text style={[styles.sectionTitle, { marginTop: 36 }]}>EU Region</Text>
-      <Text style={styles.sectionSubtitle}>
-        Enable to simulate an EU-region user. When enabled, the wallet screen
-        will require ownership verification (EU Travel Rule) after adding a new
-        wallet address.
-      </Text>
-
-      {/* Toggle card */}
-      <View style={styles.toggleCard}>
-        <View style={styles.toggleLeft}>
-          <Text style={styles.toggleTitle}>EU Travel Rule</Text>
-          <Text style={styles.toggleDesc}>
-            Calls getWalletOwnershipChallenge / submitWalletOwnershipSignature
-            after wallet registration
-          </Text>
-        </View>
-        <Switch
-          value={settings.euRegion}
-          onValueChange={toggleEuRegion}
-          trackColor={{ false: '#333', true: '#635BFF' }}
-          thumbColor="#fff"
-        />
-      </View>
 
     </ScrollView>
   );

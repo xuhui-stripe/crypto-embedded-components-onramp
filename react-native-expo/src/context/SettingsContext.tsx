@@ -10,11 +10,6 @@
  *                'api'   → real-time GET /v1/crypto/onramp_transaction_limits
  *                'local' → hardcoded table in src/kycLimits.ts
  *
- *   euRegion     When true, simulates an EU-region user. After adding a wallet
- *                in WalletScreen, the app runs the EU Travel Rule wallet
- *                ownership verification flow via getWalletOwnershipChallenge /
- *                submitWalletOwnershipSignature.
- *
  * Wrap the navigation root with <SettingsProvider> and read settings in any
  * screen with the useSettings() hook.
  */
@@ -65,7 +60,6 @@ export type LimitSource = 'api' | 'local';
 export interface AppSettings {
   kycTier: KycTier;
   limitSource: LimitSource;
-  euRegion: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +69,6 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   kycTier: 'L1',
   limitSource: 'local',
-  euRegion: false,
 };
 
 const STORAGE_KEY = '@crypto_onramp_settings_v1';
