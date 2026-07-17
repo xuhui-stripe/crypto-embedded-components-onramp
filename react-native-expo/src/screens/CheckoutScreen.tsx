@@ -48,6 +48,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const [walletChallenge, setWalletChallenge] = useState<Onramp.WalletOwnershipChallenge | null>(null);
   const [walletSig, setWalletSig] = useState('');
   const [verifyingWallet, setVerifyingWallet] = useState(false);
+  // Captures wallet address/network from the checkout response before throwing,
+  // so the confirmation alert can use the server-authoritative values.
+  const pendingVerifContextRef = useRef<{ walletAddress: string; network: string } | null>(null);
 
   const { performCheckout, getWalletOwnershipChallenge, submitWalletOwnershipSignature } = useOnramp();
 
@@ -110,6 +113,10 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         const res = await checkoutSession(sessionId, authToken);
         if (!res.success) throw new Error(res.error.message);
         if (res.data.transaction_details?.last_error === 'wallet_ownership_verification_required') {
+          pendingVerifContextRef.current = {
+            walletAddress: res.data.transaction_details.wallet_address ?? walletAddress,
+            network: res.data.transaction_details.destination_network ?? network,
+          };
           throw new Error('wallet_ownership_verification_required');
         }
         return res.data.client_secret;
@@ -137,17 +144,32 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       if (err instanceof Error && err.message === 'wallet_ownership_verification_required') {
         setChecking(false);
         setQuoteRefreshDisabled(false);
-        try {
-          const challengeResult = await getWalletOwnershipChallenge(walletAddress, network as Onramp.CryptoNetwork);
-          if (challengeResult.error) {
-            Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
-            return;
-          }
-          setWalletChallenge(challengeResult.challenge);
-          setWalletVerifPhase('signing');
-        } catch (e: any) {
-          Alert.alert('Error', e.message);
-        }
+        const verifAddress = pendingVerifContextRef.current?.walletAddress ?? walletAddress;
+        const verifNetwork = (pendingVerifContextRef.current?.network ?? network) as Onramp.CryptoNetwork;
+        pendingVerifContextRef.current = null;
+        Alert.alert(
+          'Wallet verification required',
+          'This purchase requires you to verify ownership of the selected wallet before continuing.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Verify',
+              onPress: async () => {
+                try {
+                  const challengeResult = await getWalletOwnershipChallenge(verifAddress, verifNetwork);
+                  if (challengeResult.error) {
+                    Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
+                    return;
+                  }
+                  setWalletChallenge(challengeResult.challenge);
+                  setWalletVerifPhase('signing');
+                } catch (e: any) {
+                  Alert.alert('Error', e.message);
+                }
+              },
+            },
+          ],
+        );
         return;
       }
       Alert.alert('Checkout Failed', SERVICE_TIMEOUT_ERROR);

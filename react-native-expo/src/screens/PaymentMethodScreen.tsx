@@ -556,24 +556,37 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
 
       // Check for wallet ownership verification requirement
       if (sessionResult.data.transaction_details?.last_error === 'wallet_ownership_verification_required') {
-        try {
-          const challengeResult = await getWalletOwnershipChallenge(walletAddress, network as Onramp.CryptoNetwork);
-          if (challengeResult.error) {
-            Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
-            return;
-          }
-          setWalletChallenge(challengeResult.challenge);
-          setPendingSessionNavParams({
-            sessionId: sessionResult.data.id,
-            sourceAmount,
-            sourceCurrency,
-            destinationCurrency: destCurrency,
-            paymentLabel,
-          });
-          setWalletVerifPhase('signing');
-        } catch (err: any) {
-          Alert.alert('Error', err.message);
-        }
+        const pendingParams = {
+          sessionId: sessionResult.data.id,
+          sourceAmount,
+          sourceCurrency,
+          destinationCurrency: destCurrency,
+          paymentLabel,
+        };
+        Alert.alert(
+          'Wallet verification required',
+          'This purchase requires you to verify ownership of the selected wallet before continuing.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Verify',
+              onPress: async () => {
+                try {
+                  const challengeResult = await getWalletOwnershipChallenge(walletAddress, network as Onramp.CryptoNetwork);
+                  if (challengeResult.error) {
+                    Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
+                    return;
+                  }
+                  setWalletChallenge(challengeResult.challenge);
+                  setPendingSessionNavParams(pendingParams);
+                  setWalletVerifPhase('signing');
+                } catch (err: any) {
+                  Alert.alert('Error', err.message);
+                }
+              },
+            },
+          ],
+        );
         return;
       }
 
