@@ -20,6 +20,13 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { getCustomerWallets } from '../api/client';
+import { useSettings } from '../context/SettingsContext';
+
+type WalletOwnershipChallenge = {
+  challenge_id: string;
+  message: string;
+  expires_at: string;
+};
 
 const NETWORKS: { label: string; value: Onramp.CryptoNetwork }[] = [
   { label: 'Ethereum', value: Onramp.CryptoNetwork.ethereum },
@@ -37,6 +44,7 @@ type Props = {
 
 export default function WalletScreen({ navigation, route }: Props) {
   const { customerId, authToken } = route.params;
+  const { settings } = useSettings();
   const [existingWallets, setExistingWallets] = useState<ExistingWallet[]>([]);
   const [loadingWallets, setLoadingWallets] = useState(true);
   const [selectedWallet, setSelectedWallet] = useState<ExistingWallet | null>(null);
@@ -44,8 +52,18 @@ export default function WalletScreen({ navigation, route }: Props) {
   const [address, setAddress] = useState('');
   const [network, setNetwork] = useState<Onramp.CryptoNetwork>(Onramp.CryptoNetwork.ethereum);
   const [registering, setRegistering] = useState(false);
+  const [verifyPhase, setVerifyPhase] = useState<'idle' | 'signing'>('idle');
+  const [ownershipChallenge, setOwnershipChallenge] = useState<WalletOwnershipChallenge | null>(null);
+  const [signature, setSignature] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [pendingNavParams, setPendingNavParams] = useState<{ address: string; network: string } | null>(null);
 
-  const { registerWalletAddress } = useOnramp();
+  const onrampHook = useOnramp();
+  const { registerWalletAddress } = onrampHook;
+  const getWalletOwnershipChallenge = (onrampHook as any).getWalletOwnershipChallenge as
+    ((addr: string, net: string) => Promise<WalletOwnershipChallenge & { error?: any }>) | undefined;
+  const submitWalletOwnershipSignature = (onrampHook as any).submitWalletOwnershipSignature as
+    ((challengeId: string, sig: string) => Promise<{ error?: any }>) | undefined;
 
   useEffect(() => {
     (async () => {
@@ -81,16 +99,55 @@ export default function WalletScreen({ navigation, route }: Props) {
         Alert.alert('Error', result.error.message);
         return;
       }
-      navigation.navigate('PaymentMethod', {
-        customerId,
-        authToken,
-        walletAddress: address.trim(),
-        network,
-      });
+      if (settings.euRegion && getWalletOwnershipChallenge) {
+        try {
+          const challenge = await getWalletOwnershipChallenge(address.trim(), network);
+          if (challenge?.error) {
+            Alert.alert('Error', challenge.error.message ?? 'Failed to get ownership challenge.');
+            return;
+          }
+          setOwnershipChallenge(challenge);
+          setPendingNavParams({ address: address.trim(), network });
+          setVerifyPhase('signing');
+        } catch (err: any) {
+          Alert.alert('Error', err.message);
+        }
+      } else {
+        navigation.navigate('PaymentMethod', {
+          customerId,
+          authToken,
+          walletAddress: address.trim(),
+          network,
+        });
+      }
     } catch (err: any) {
       Alert.alert('Error', err.message);
     } finally {
       setRegistering(false);
+    }
+  };
+
+  const handleSubmitSignature = async () => {
+    if (!ownershipChallenge || !pendingNavParams) return;
+    setVerifying(true);
+    try {
+      const result = submitWalletOwnershipSignature
+        ? await submitWalletOwnershipSignature(ownershipChallenge.challenge_id, signature)
+        : { error: { message: 'submitWalletOwnershipSignature not available' } };
+      if (result?.error) {
+        Alert.alert('Error', result.error.message ?? 'Signature verification failed.');
+        return;
+      }
+      navigation.navigate('PaymentMethod', {
+        customerId,
+        authToken,
+        walletAddress: pendingNavParams.address,
+        network: pendingNavParams.network,
+      });
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -102,6 +159,53 @@ export default function WalletScreen({ navigation, route }: Props) {
       <View style={[styles.container, styles.center]}>
         <ActivityIndicator color="#635BFF" size="large" />
       </View>
+    );
+  }
+
+  if (verifyPhase === 'signing' && ownershipChallenge) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <Text style={styles.title}>Verify Wallet Ownership</Text>
+        <Text style={styles.subtitle}>
+          EU Travel Rule requires proof that you control this wallet.
+        </Text>
+
+        <Text style={styles.label}>Challenge Message</Text>
+        <TextInput
+          style={[styles.input, styles.inputMono, { minHeight: 100 }]}
+          value={ownershipChallenge.message}
+          editable={false}
+          multiline
+          selectTextOnFocus
+        />
+
+        <View style={styles.testCard}>
+          <Text style={styles.testCardText}>
+            Test mode: paste the challenge message above as the signature to pass verification.
+          </Text>
+        </View>
+
+        <Text style={styles.label}>Signature</Text>
+        <TextInput
+          style={styles.input}
+          value={signature}
+          onChangeText={setSignature}
+          placeholder="Paste your signature here"
+          placeholderTextColor="#555"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+
+        <TouchableOpacity
+          style={[styles.button, (verifying || !signature) && styles.buttonDisabled]}
+          onPress={handleSubmitSignature}
+          disabled={verifying || !signature}
+        >
+          {verifying
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.buttonText}>Verify Ownership</Text>}
+        </TouchableOpacity>
+      </ScrollView>
     );
   }
 
@@ -259,4 +363,14 @@ const styles = StyleSheet.create({
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   addNewLink: { alignItems: 'center', marginTop: 16 },
   addNewText: { color: '#635BFF', fontSize: 14, fontWeight: '600' },
+  inputMono: { fontFamily: 'Courier', fontSize: 13, color: '#ccc' },
+  testCard: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    marginBottom: 20,
+  },
+  testCardText: { color: '#7070cc', fontSize: 13, lineHeight: 18 },
 });
