@@ -21,13 +21,26 @@ import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Dayjs } from "dayjs";
-import type { KycInfo, CryptoNetwork, OnrampCoordinator } from "@stripe/crypto";
+import type { KycInfo, CryptoNetwork, OnrampCoordinator, CryptoConsumerWallet } from "@stripe/crypto";
 import { getTheme } from "./theme";
 import { LOCAL_LIMITS } from "./kycLimits";
 import { EXPLORER_URLS, getNetworks, isEuCountry, EU_COUNTRIES } from "./shared";
 import { EU_COUNTRY_NAMES } from "./euIdentifiers";
 import type { AccountStatus, KycLevel, KycRegion, Wallet, OnrampSession } from "./types";
 import { EuKycStep } from "./EuKycStep";
+
+// ─── EU Travel Rule types ──────────────────────────────────
+type WalletOwnershipChallenge = {
+  challenge_id: string;
+  message: string;
+  expires_at: string;
+  wallet_address: string;
+  network: string;
+};
+type EuOnrampCoordinator = OnrampCoordinator & {
+  getWalletOwnershipChallenge: (walletAddress: string, network: string) => Promise<WalletOwnershipChallenge>;
+  submitWalletOwnershipSignature: (challengeId: string, signature: string) => Promise<CryptoConsumerWallet>;
+};
 
 export type WizardViewProps = {
   darkMode: boolean;
@@ -216,6 +229,13 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
   const [newNet, setNewNet] = useState<CryptoNetwork>("solana");
   const [adding, setAdding] = useState(false);
   const [deletingWalletId, setDeletingWalletId] = useState<string | null>(null);
+
+  // EU Travel Rule — wallet ownership verification (step 2)
+  const [walletVerifPhase, setWalletVerifPhase] = useState<'idle' | 'signing'>('idle');
+  const [walletChallenge, setWalletChallenge] = useState<WalletOwnershipChallenge | null>(null);
+  const [walletSig, setWalletSig] = useState('');
+  const [verifyingWallet, setVerifyingWallet] = useState(false);
+  const [pendingWalletInfo, setPendingWalletInfo] = useState<{ address: string; network: CryptoNetwork } | null>(null);
 
   // Step 3: Payment
   const paymentRef = useRef<HTMLDivElement>(null);
@@ -1224,8 +1244,20 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                   setAdding(true);
                   try {
                     await props.onRegisterWallet(newAddr, newNet);
-                    setNewAddr("");
-                    await fetchWallets();
+                    if (props.kycRegion === 'eu') {
+                      // EU Travel Rule: request a wallet ownership challenge
+                      setPendingWalletInfo({ address: newAddr, network: newNet });
+                      try {
+                        const challenge = await (props.onramp as EuOnrampCoordinator).getWalletOwnershipChallenge(newAddr, newNet);
+                        setWalletChallenge(challenge);
+                        setWalletVerifPhase('signing');
+                      } catch (e: any) {
+                        props.setError(`Wallet challenge error: ${e?.message || e}`);
+                      }
+                    } else {
+                      setNewAddr('');
+                      await fetchWallets();
+                    }
                   } catch {}
                   setAdding(false);
                 }}
@@ -1235,6 +1267,74 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 Add
               </Button>
             </Stack>
+            {walletVerifPhase === 'signing' && walletChallenge && (
+              <Stack spacing={2} sx={{ pt: 1 }}>
+                <Divider sx={{ borderColor: colors.borderSubtle }} />
+                <Typography sx={{ color: colors.textPrimary, fontSize: '1rem', fontWeight: 700 }}>
+                  EU Travel Rule — Verify Wallet Ownership
+                </Typography>
+                <Typography sx={{ color: colors.textSecondary, fontSize: '0.85rem' }}>
+                  Sign the challenge message below with your wallet, then paste the signature.
+                </Typography>
+                <TextField
+                  label="Challenge Message"
+                  value={walletChallenge.message}
+                  size="small"
+                  fullWidth
+                  multiline
+                  rows={3}
+                  InputProps={{ readOnly: true }}
+                  sx={{ ...inputSx, fontFamily: 'monospace', fontSize: '0.75rem' }}
+                />
+                <Box sx={{ bgcolor: '#141f14', borderRadius: 1, p: 1.5, border: '1px solid #1e3a1e' }}>
+                  <Typography sx={{ color: '#22c55e', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, mb: 0.5 }}>
+                    Test mode
+                  </Typography>
+                  <Typography sx={{ color: '#777', fontSize: '0.8rem' }}>
+                    Paste the challenge message above as the signature to pass verification in test mode.
+                  </Typography>
+                </Box>
+                <TextField
+                  label="Signature"
+                  value={walletSig}
+                  onChange={(e) => setWalletSig(e.target.value)}
+                  size="small"
+                  fullWidth
+                  multiline
+                  rows={2}
+                  placeholder="Paste your wallet signature here"
+                  sx={inputSx}
+                />
+                <Button
+                  variant="contained"
+                  onClick={async () => {
+                    if (!walletChallenge || !pendingWalletInfo) return;
+                    setVerifyingWallet(true);
+                    props.setError(null);
+                    try {
+                      props.log('EU Travel Rule: Submitting wallet ownership signature', `challengeId=${walletChallenge.challenge_id}`);
+                      await (props.onramp as EuOnrampCoordinator).submitWalletOwnershipSignature(walletChallenge.challenge_id, walletSig);
+                      props.log('EU Travel Rule: Wallet ownership verified');
+                      setWalletVerifPhase('idle');
+                      setWalletChallenge(null);
+                      setWalletSig('');
+                      setNewAddr('');
+                      setPendingWalletInfo(null);
+                      await fetchWallets();
+                    } catch (e: any) {
+                      props.setError(`Wallet ownership verification failed: ${e?.message || e}`);
+                    } finally {
+                      setVerifyingWallet(false);
+                    }
+                  }}
+                  disabled={verifyingWallet || !walletSig.trim()}
+                  fullWidth
+                  sx={accentButtonSx}
+                >
+                  {verifyingWallet ? <CircularProgress size={20} sx={{ color: '#fff' }} /> : 'Submit Signature'}
+                </Button>
+              </Stack>
+            )}
           </Stack>
         );
 
