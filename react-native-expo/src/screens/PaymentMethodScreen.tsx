@@ -111,11 +111,8 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
+import { Onramp } from '@stripe/stripe-react-native';
 import { useOnramp } from '../hooks/useOnramp';
-
-type _OnrampHook = ReturnType<typeof useOnramp>;
-type WalletOwnershipChallenge = Awaited<ReturnType<_OnrampHook['getWalletOwnershipChallenge']>>['challenge'];
-type CryptoNetwork = Parameters<_OnrampHook['getWalletOwnershipChallenge']>[1];
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
@@ -179,7 +176,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
   // Wallet ownership verification state — triggered when session creation or
   // checkout returns wallet_ownership_verification_required.
   const [walletVerifPhase, setWalletVerifPhase] = useState<'idle' | 'signing'>('idle');
-  const [walletChallenge, setWalletChallenge] = useState<WalletOwnershipChallenge | null>(null);
+  const [walletChallenge, setWalletChallenge] = useState<Onramp.WalletOwnershipChallenge | null>(null);
   const [walletSig, setWalletSig] = useState('');
   const [verifyingWallet, setVerifyingWallet] = useState(false);
   const [pendingSessionNavParams, setPendingSessionNavParams] = useState<{
@@ -575,7 +572,7 @@ export default function PaymentMethodScreen({ navigation, route }: Props) {
               text: 'Verify',
               onPress: async () => {
                 try {
-                  const challengeResult = await getWalletOwnershipChallenge(walletAddress, network as CryptoNetwork);
+                  const challengeResult = await getWalletOwnershipChallenge(walletAddress, network as Onramp.CryptoNetwork);
                   if (challengeResult.error) {
                     Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
                     return;
