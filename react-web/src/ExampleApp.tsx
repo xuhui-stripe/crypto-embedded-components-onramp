@@ -482,7 +482,7 @@ const ExampleAppInner: React.FC<{
   ]);
 
   const handleCheckout = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string): Promise<void | 'wallet_ownership_required'> => {
       setLoading(true);
       setError(null);
       log("Checking out onramp session", `sessionId=${sessionId}`);
@@ -501,6 +501,9 @@ const ExampleAppInner: React.FC<{
             const data = await response.json();
             if (response.ok) {
               log("Checkout complete", `status=${data.status}`);
+              if (data.transaction_details?.last_error === 'wallet_ownership_verification_required') {
+                throw new Error('wallet_ownership_verification_required');
+              }
             } else {
               surfaceError(
                 "Checkout failed",
@@ -514,6 +517,10 @@ const ExampleAppInner: React.FC<{
           surfaceError("Checkout failed");
         }
       } catch (e) {
+        if (e instanceof Error && e.message === 'wallet_ownership_verification_required') {
+          setLoading(false);
+          return 'wallet_ownership_required';
+        }
         surfaceError("Checkout error", e);
       } finally {
         setLoading(false);
@@ -523,13 +530,13 @@ const ExampleAppInner: React.FC<{
   );
 
   const handleAddFunds = useCallback(
-    async (amount: string, destinationCurrency: string) => {
+    async (amount: string, destinationCurrency: string, sourceCurrency: string = "usd") => {
       if (!cryptoCustomerId || !linkAuthIntentId) return;
       setLoading(true);
       setError(null);
       log(
         "Creating onramp session",
-        `amount=$${amount}, currency=${destinationCurrency}`,
+        `amount=$${amount}, currency=${destinationCurrency}, source=${sourceCurrency}`,
       );
       try {
         const response = await fetch("/api/crypto/onramp_sessions", {
@@ -540,7 +547,7 @@ const ExampleAppInner: React.FC<{
             livemode,
             crypto_customer_id: cryptoCustomerId,
             payment_token: cryptoPaymentToken,
-            source_currency: "usd",
+            source_currency: sourceCurrency,
             destination_currency: destinationCurrency,
             source_amount: amount,
             wallet_address: selectedWallet,

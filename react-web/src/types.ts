@@ -33,6 +33,8 @@ export type OnrampSession = {
     destination_network: string;
     wallet_address: string;
     quote_expiration?: string;
+    last_error?: string;
+    source_currency?: string;
     fees: {
       network_fee_amount: string;
       transaction_fee_amount: string;
