@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
   ScrollView,
 } from 'react-native';
+import { Onramp } from '@stripe/stripe-react-native';
 import { useOnramp } from '../hooks/useOnramp';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -23,6 +24,7 @@ function truncateAddress(addr: string): string {
 function formatCurrency(amount: string | number, currency: string): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
   if (currency === 'usd') return `$${num.toFixed(2)}`;
+  if (currency === 'eur') return `€${num.toFixed(2)}`;
   return `${num} ${currency.toUpperCase()}`;
 }
 
@@ -40,7 +42,14 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const [quoteRefreshDisabled, setQuoteRefreshDisabled] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { performCheckout } = useOnramp();
+  // Wallet ownership verification state — triggered when checkout returns
+  // wallet_ownership_verification_required.
+  const [walletVerifPhase, setWalletVerifPhase] = useState<'idle' | 'signing'>('idle');
+  const [walletChallenge, setWalletChallenge] = useState<Onramp.WalletOwnershipChallenge | null>(null);
+  const [walletSig, setWalletSig] = useState('');
+  const [verifyingWallet, setVerifyingWallet] = useState(false);
+
+  const { performCheckout, getWalletOwnershipChallenge, submitWalletOwnershipSignature } = useOnramp();
 
   const destCurrencyUpper = destinationCurrency.toUpperCase();
   const currencyName = CURRENCY_NAMES[destinationCurrency] ?? destCurrencyUpper;
@@ -100,6 +109,9 @@ export default function CheckoutScreen({ navigation, route }: Props) {
       const result = await performCheckout(sessionId, async () => {
         const res = await checkoutSession(sessionId, authToken);
         if (!res.success) throw new Error(res.error.message);
+        if (res.data.transaction_details?.last_error === 'wallet_ownership_verification_required') {
+          throw new Error('wallet_ownership_verification_required');
+        }
         return res.data.client_secret;
       });
 
@@ -121,10 +133,47 @@ export default function CheckoutScreen({ navigation, route }: Props) {
         destinationCurrency,
         customerId, authToken, walletAddress, network,
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message === 'wallet_ownership_verification_required') {
+        setChecking(false);
+        setQuoteRefreshDisabled(false);
+        try {
+          const challengeResult = await getWalletOwnershipChallenge(walletAddress, network as Onramp.CryptoNetwork);
+          if (challengeResult.error) {
+            Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
+            return;
+          }
+          setWalletChallenge(challengeResult.challenge);
+          setWalletVerifPhase('signing');
+        } catch (e: any) {
+          Alert.alert('Error', e.message);
+        }
+        return;
+      }
       Alert.alert('Checkout Failed', SERVICE_TIMEOUT_ERROR);
       setChecking(false);
       setQuoteRefreshDisabled(false);
+    }
+  };
+
+  const handleSubmitWalletSig = async () => {
+    if (!walletChallenge) return;
+    setVerifyingWallet(true);
+    try {
+      const result = await submitWalletOwnershipSignature(walletChallenge.challengeId, walletSig);
+      if (result?.error) {
+        Alert.alert('Error', result.error.message ?? 'Signature verification failed.');
+        return;
+      }
+      // Clear verification phase and retry checkout
+      setWalletVerifPhase('idle');
+      setWalletChallenge(null);
+      setWalletSig('');
+      await runCheckout();
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    } finally {
+      setVerifyingWallet(false);
     }
   };
 
@@ -133,6 +182,53 @@ export default function CheckoutScreen({ navigation, route }: Props) {
   const transactionFee = parseFloat(quote?.fees?.transaction_fee_amount ?? '0');
   const totalFees = networkFee + transactionFee;
   const total = parseFloat(quote?.source_amount ?? sourceAmount) + totalFees;
+
+  if (walletVerifPhase === 'signing' && walletChallenge) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <Text style={styles.title}>Verify Wallet Ownership</Text>
+        <Text style={styles.verifySubtitle}>
+          EU Travel Rule requires proof that you control this wallet.
+        </Text>
+
+        <Text style={styles.verifyLabel}>Challenge Message</Text>
+        <TextInput
+          style={[styles.verifyInput, styles.verifyInputMono, { minHeight: 100 }]}
+          value={walletChallenge.message}
+          editable={false}
+          multiline
+          selectTextOnFocus
+        />
+
+        <View style={styles.testCard}>
+          <Text style={styles.testCardText}>
+            Test mode: paste the challenge message above as the signature to pass verification.
+          </Text>
+        </View>
+
+        <Text style={styles.verifyLabel}>Signature</Text>
+        <TextInput
+          style={styles.verifyInput}
+          value={walletSig}
+          onChangeText={setWalletSig}
+          placeholder="Paste your signature here"
+          placeholderTextColor="#555"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+
+        <TouchableOpacity
+          style={[styles.button, (verifyingWallet || !walletSig) && styles.buttonDisabled]}
+          onPress={handleSubmitWalletSig}
+          disabled={verifyingWallet || !walletSig}
+        >
+          {verifyingWallet
+            ? <ActivityIndicator color="#fff" />
+            : <Text style={styles.buttonText}>Verify Ownership</Text>}
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -276,4 +372,29 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // Wallet ownership verification styles
+  verifySubtitle: { fontSize: 14, color: '#888', marginBottom: 24 },
+  verifyLabel: { color: '#aaa', fontSize: 13, marginBottom: 8 },
+  verifyInput: {
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    color: '#fff',
+    fontSize: 15,
+    marginBottom: 24,
+  },
+  verifyInputMono: { fontFamily: 'Courier', fontSize: 13, color: '#ccc' },
+  testCard: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    marginBottom: 20,
+  },
+  testCardText: { color: '#7070cc', fontSize: 13, lineHeight: 18 },
 });

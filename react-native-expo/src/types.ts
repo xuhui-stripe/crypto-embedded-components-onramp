@@ -61,6 +61,7 @@ export type RootStackParamList = {
     authToken: string;
     walletAddress: string;
     network: string;
+    kycRegion?: string;
     /**
      * Pre-filled when returning from KYCStepUpScreen. Carrying these params
      * back lets PaymentMethod re-check limits for the new tier without asking

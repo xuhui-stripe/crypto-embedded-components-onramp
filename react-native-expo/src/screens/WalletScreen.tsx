@@ -78,6 +78,7 @@ export default function WalletScreen({ navigation, route }: Props) {
       authToken,
       walletAddress: selectedWallet.wallet_address,
       network: selectedWallet.network,
+      kycRegion: kycRegion ?? undefined,
     });
   };
 
@@ -112,6 +113,7 @@ export default function WalletScreen({ navigation, route }: Props) {
           authToken,
           walletAddress: address.trim(),
           network,
+          kycRegion: kycRegion ?? undefined,
         });
       }
     } catch (err: any) {
@@ -135,6 +137,7 @@ export default function WalletScreen({ navigation, route }: Props) {
         authToken,
         walletAddress: pendingNavParams.address,
         network: pendingNavParams.network,
+        kycRegion: kycRegion ?? undefined,
       });
     } catch (err: any) {
       Alert.alert('Error', err.message);
