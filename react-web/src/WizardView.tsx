@@ -21,45 +21,13 @@ import { DatePicker } from "@mui/x-date-pickers/DatePicker";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Dayjs } from "dayjs";
-import type { KycInfo, CryptoNetwork, OnrampCoordinator, CryptoConsumerWallet } from "@stripe/crypto";
+import type { KycInfo, CryptoNetwork, OnrampCoordinator, WalletOwnershipChallenge } from "@stripe/crypto";
 import { getTheme } from "./theme";
-
-// Extended coordinator interface for EU Travel Rule wallet ownership verification.
-// These methods are available in the SDK at runtime for EU customers but are not
-// yet reflected in the published @stripe/crypto type definitions.
-export interface WalletOwnershipChallenge {
-  challengeId: string;
-  message: string;
-}
-
-export interface EuOnrampCoordinator extends OnrampCoordinator {
-  getWalletOwnershipChallenge: (
-    walletAddress: string,
-    network: CryptoNetwork,
-  ) => Promise<{ challenge: WalletOwnershipChallenge; error?: { message?: string } }>;
-  submitWalletOwnershipSignature: (
-    challengeId: string,
-    signature: string,
-  ) => Promise<{ error?: { message?: string } } | null>;
-}
 import { LOCAL_LIMITS } from "./kycLimits";
 import { EXPLORER_URLS, getNetworks, isEuCountry, EU_COUNTRIES } from "./shared";
 import { EU_COUNTRY_NAMES } from "./euIdentifiers";
 import type { AccountStatus, KycLevel, KycRegion, Wallet, OnrampSession } from "./types";
 import { EuKycStep } from "./EuKycStep";
-
-// ─── EU Travel Rule types ──────────────────────────────────
-type WalletOwnershipChallenge = {
-  challenge_id: string;
-  message: string;
-  expires_at: string;
-  wallet_address: string;
-  network: string;
-};
-type EuOnrampCoordinator = OnrampCoordinator & {
-  getWalletOwnershipChallenge: (walletAddress: string, network: string) => Promise<WalletOwnershipChallenge>;
-  submitWalletOwnershipSignature: (challengeId: string, signature: string) => Promise<CryptoConsumerWallet>;
-};
 
 export type WizardViewProps = {
   darkMode: boolean;
@@ -548,15 +516,10 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
     if (!sessionWalletChallenge) return;
     setVerifyingSessionWallet(true);
     try {
-      const euCoordinator = props.onramp as EuOnrampCoordinator;
-      const result = await euCoordinator.submitWalletOwnershipSignature(
-        sessionWalletChallenge.challengeId,
-        sessionWalletSig,
-      );
-      if (result?.error) {
-        setError(result.error.message ?? 'Signature verification failed.');
-        return;
-      }
+      await props.onramp.submitWalletOwnershipSignature({
+        challengeId: sessionWalletChallenge.challengeId,
+        signature: sessionWalletSig,
+      });
       const phase = sessionWalletVerifPhase;
       setSessionWalletVerifPhase('idle');
       setSessionWalletChallenge(null);
@@ -1332,7 +1295,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                       // EU Travel Rule: request a wallet ownership challenge
                       setPendingWalletInfo({ address: newAddr, network: newNet });
                       try {
-                        const challenge = await (props.onramp as EuOnrampCoordinator).getWalletOwnershipChallenge(newAddr, newNet);
+                        const challenge = await props.onramp.getWalletOwnershipChallenge({ walletAddress: newAddr, network: newNet });
                         setWalletChallenge(challenge);
                         setWalletVerifPhase('signing');
                       } catch (e: any) {
@@ -1396,8 +1359,8 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                     setVerifyingWallet(true);
                     props.setError(null);
                     try {
-                      props.log('EU Travel Rule: Submitting wallet ownership signature', `challengeId=${walletChallenge.challenge_id}`);
-                      await (props.onramp as EuOnrampCoordinator).submitWalletOwnershipSignature(walletChallenge.challenge_id, walletSig);
+                      props.log('EU Travel Rule: Submitting wallet ownership signature', `challengeId=${walletChallenge.challengeId}`);
+                      await props.onramp.submitWalletOwnershipSignature({ challengeId: walletChallenge.challengeId, signature: walletSig });
                       props.log('EU Travel Rule: Wallet ownership verified');
                       setWalletVerifPhase('idle');
                       setWalletChallenge(null);
@@ -1785,14 +1748,12 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                       if (result === 'wallet_ownership_required') {
                         setBuySubStep('confirm');
                         try {
-                          const challengeResult = await (props.onramp as EuOnrampCoordinator).getWalletOwnershipChallenge(
-                            props.selectedWallet!,
-                            props.selectedWalletNetwork! as CryptoNetwork,
-                          );
-                          if (!challengeResult.error) {
-                            setSessionWalletChallenge(challengeResult.challenge ?? challengeResult as any);
-                            setSessionWalletVerifPhase('signing_for_checkout');
-                          }
+                          const challenge = await props.onramp.getWalletOwnershipChallenge({
+                            walletAddress: props.selectedWallet!,
+                            network: props.selectedWalletNetwork! as CryptoNetwork,
+                          });
+                          setSessionWalletChallenge(challenge);
+                          setSessionWalletVerifPhase('signing_for_checkout');
                         } catch (e: any) {
                           setError(e?.message ?? 'Failed to get wallet ownership challenge.');
                         }
@@ -2004,15 +1965,13 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 if (s) {
                   if (s.transaction_details?.last_error === 'wallet_ownership_verification_required') {
                     try {
-                      const challengeResult = await (props.onramp as EuOnrampCoordinator).getWalletOwnershipChallenge(
-                        props.selectedWallet!,
-                        props.selectedWalletNetwork! as CryptoNetwork,
-                      );
-                      if (!challengeResult.error) {
-                        setSessionWalletChallenge(challengeResult.challenge ?? challengeResult as any);
-                        setSessionWalletVerifPhase('signing_for_session');
-                        setSession(s);
-                      }
+                      const challenge = await props.onramp.getWalletOwnershipChallenge({
+                        walletAddress: props.selectedWallet!,
+                        network: props.selectedWalletNetwork! as CryptoNetwork,
+                      });
+                      setSessionWalletChallenge(challenge);
+                      setSessionWalletVerifPhase('signing_for_session');
+                      setSession(s);
                     } catch (e: any) {
                       setError(e?.message ?? 'Failed to get wallet ownership challenge.');
                     }
