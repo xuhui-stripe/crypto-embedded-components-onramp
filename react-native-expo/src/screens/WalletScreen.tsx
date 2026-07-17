@@ -21,12 +21,6 @@ import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { getCustomerWallets, getCryptoCustomer } from '../api/client';
 
-type WalletOwnershipChallenge = {
-  challenge_id: string;
-  message: string;
-  expires_at: string;
-};
-
 const NETWORKS: { label: string; value: Onramp.CryptoNetwork }[] = [
   { label: 'Ethereum', value: Onramp.CryptoNetwork.ethereum },
   { label: 'Bitcoin', value: Onramp.CryptoNetwork.bitcoin },
@@ -52,17 +46,12 @@ export default function WalletScreen({ navigation, route }: Props) {
   const [network, setNetwork] = useState<Onramp.CryptoNetwork>(Onramp.CryptoNetwork.ethereum);
   const [registering, setRegistering] = useState(false);
   const [verifyPhase, setVerifyPhase] = useState<'idle' | 'signing'>('idle');
-  const [ownershipChallenge, setOwnershipChallenge] = useState<WalletOwnershipChallenge | null>(null);
+  const [ownershipChallenge, setOwnershipChallenge] = useState<Onramp.WalletOwnershipChallenge | null>(null);
   const [signature, setSignature] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [pendingNavParams, setPendingNavParams] = useState<{ address: string; network: string } | null>(null);
 
-  const onrampHook = useOnramp();
-  const { registerWalletAddress } = onrampHook;
-  const getWalletOwnershipChallenge = (onrampHook as any).getWalletOwnershipChallenge as
-    ((addr: string, net: string) => Promise<WalletOwnershipChallenge & { error?: any }>) | undefined;
-  const submitWalletOwnershipSignature = (onrampHook as any).submitWalletOwnershipSignature as
-    ((challengeId: string, sig: string) => Promise<{ error?: any }>) | undefined;
+  const { registerWalletAddress, getWalletOwnershipChallenge, submitWalletOwnershipSignature } = useOnramp();
 
   useEffect(() => {
     (async () => {
@@ -104,14 +93,14 @@ export default function WalletScreen({ navigation, route }: Props) {
         Alert.alert('Error', result.error.message);
         return;
       }
-      if (kycRegion === 'eu' && getWalletOwnershipChallenge) {
+      if (kycRegion === 'eu') {
         try {
-          const challenge = await getWalletOwnershipChallenge(address.trim(), network);
-          if (challenge?.error) {
-            Alert.alert('Error', challenge.error.message ?? 'Failed to get ownership challenge.');
+          const challengeResult = await getWalletOwnershipChallenge(address.trim(), network);
+          if (challengeResult.error) {
+            Alert.alert('Error', challengeResult.error.message ?? 'Failed to get ownership challenge.');
             return;
           }
-          setOwnershipChallenge(challenge);
+          setOwnershipChallenge(challengeResult.challenge);
           setPendingNavParams({ address: address.trim(), network });
           setVerifyPhase('signing');
         } catch (err: any) {
@@ -136,9 +125,7 @@ export default function WalletScreen({ navigation, route }: Props) {
     if (!ownershipChallenge || !pendingNavParams) return;
     setVerifying(true);
     try {
-      const result = submitWalletOwnershipSignature
-        ? await submitWalletOwnershipSignature(ownershipChallenge.challenge_id, signature)
-        : { error: { message: 'submitWalletOwnershipSignature not available' } };
+      const result = await submitWalletOwnershipSignature(ownershipChallenge.challengeId, signature);
       if (result?.error) {
         Alert.alert('Error', result.error.message ?? 'Signature verification failed.');
         return;
