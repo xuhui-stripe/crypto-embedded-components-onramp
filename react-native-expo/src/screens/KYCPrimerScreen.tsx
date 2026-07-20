@@ -2,11 +2,13 @@
  * KYCPrimerScreen — consent and overview screen shown before identity collection.
  *
  * Recommended operations at this step:
- *   - Display what information will be collected (varies by KYC tier).
+ *   - Display what information will be collected (varies by KYC tier / region).
  *   - Explain that the data is handled by Link / Stripe, not the merchant.
  *   - No API calls are made here.
  *
- * Next screen: KYCScreen (collects name; L1/L2 also collect SSN + date of birth)
+ * Next screen:
+ *   - EU region → EuKycScreen (4-step EU identity verification)
+ *   - US region  → KYCScreen  (name/SSN/DOB → AddressScreen)
  */
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
@@ -21,7 +23,7 @@ type Props = {
   route: RouteProp<RootStackParamList, 'KYCPrimer'>;
 };
 
-// What each tier requires the user to provide.
+// What each tier requires the user to provide (US flow).
 const REQUIREMENTS_BY_TIER = {
   L0: [
     'Full name',
@@ -43,15 +45,38 @@ const REQUIREMENTS_BY_TIER = {
   ],
 };
 
+const EU_REQUIREMENTS = [
+  'Full name and date of birth',
+  'Home address',
+  'Birth city and country',
+  'Nationality',
+  'National identifier (MiCA / CARF)',
+  'Terms of Service acceptance',
+  'Government-issued photo ID + selfie',
+];
+
 export default function KYCPrimerScreen({ navigation, route }: Props) {
-  const { customerId, authToken } = route.params;
+  const { customerId, authToken, kycRegion } = route.params;
   const { settings } = useSettings();
 
-  const requirements = REQUIREMENTS_BY_TIER[settings.kycTier];
+  const isEu = kycRegion === 'eu';
+  const requirements = isEu ? EU_REQUIREMENTS : REQUIREMENTS_BY_TIER[settings.kycTier];
+
+  const handleContinue = () => {
+    if (isEu) {
+      navigation.navigate('EuKyc', { customerId, authToken });
+    } else {
+      navigation.navigate('KYC', { customerId, authToken });
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.tierBadge}>{settings.kycTier}</Text>
+      {isEu ? (
+        <Text style={styles.tierBadge}>EU</Text>
+      ) : (
+        <Text style={styles.tierBadge}>{settings.kycTier}</Text>
+      )}
       <Text style={styles.title}>Add your personal info</Text>
       <Text style={styles.description}>
         Next, Link needs to collect a few personal details to verify your
@@ -68,6 +93,14 @@ export default function KYCPrimerScreen({ navigation, route }: Props) {
         </Text>
       </Text>
 
+      {isEu && (
+        <View style={styles.noteBanner}>
+          <Text style={styles.noteText}>
+            EU customers must complete identity verification under MiCA / CARF regulations.
+          </Text>
+        </View>
+      )}
+
       <Text style={styles.requiredLabel}>{"What's required:"}</Text>
       {requirements.map(item => (
         <View key={item} style={styles.bulletRow}>
@@ -77,7 +110,7 @@ export default function KYCPrimerScreen({ navigation, route }: Props) {
       ))}
 
       {/* L2 note about the identity-document step */}
-      {settings.kycTier === 'L2' && (
+      {!isEu && settings.kycTier === 'L2' && (
         <View style={styles.noteBanner}>
           <Text style={styles.noteText}>
             The ID and selfie are captured via Stripe's built-in secure
@@ -95,10 +128,7 @@ export default function KYCPrimerScreen({ navigation, route }: Props) {
 
       <View style={styles.spacer} />
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => navigation.navigate('KYC', { customerId, authToken })}
-      >
+      <TouchableOpacity style={styles.button} onPress={handleContinue}>
         <Text style={styles.buttonText}>Continue</Text>
       </TouchableOpacity>
     </View>
@@ -142,7 +172,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a2a',
     borderRadius: 10,
     padding: 12,
-    marginTop: 12,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#2a2a4a',
   },
