@@ -17,13 +17,13 @@ type Props = {
 };
 
 const COUNTRIES = [
-  { code: 'US', label: 'US' },
-  { code: 'DE', label: 'DE' },
-  { code: 'FR', label: 'FR' },
-  { code: 'IT', label: 'IT' },
-  { code: 'NL', label: 'NL' },
-  { code: 'ES', label: 'ES' },
-  { code: 'GB', label: 'GB' },
+  { code: 'US', label: '🇺🇸 US' },
+  { code: 'DE', label: '🇩🇪 DE' },
+  { code: 'FR', label: '🇫🇷 FR' },
+  { code: 'IT', label: '🇮🇹 IT' },
+  { code: 'NL', label: '🇳🇱 NL' },
+  { code: 'ES', label: '🇪🇸 ES' },
+  { code: 'GB', label: '🇬🇧 GB' },
 ];
 
 export default function RegisterScreen({ navigation, route }: Props) {
