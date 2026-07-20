@@ -51,11 +51,12 @@ function maskSSN(raw: string): string {
 }
 
 export default function KYCScreen({ navigation, route }: Props) {
-  const { customerId, authToken } = route.params;
+  const { customerId, authToken, kycRegion } = route.params;
   const { settings } = useSettings();
 
-  // L1/L2 collect SSN and DOB; L0 only collects name.
-  const collectSensitiveFields = settings.kycTier !== 'L0';
+  // EU customers always need at least L1 fields regardless of demo tier setting.
+  const collectSensitiveFields = settings.kycTier !== 'L0' || kycRegion === 'eu';
+  const effectiveTier = kycRegion === 'eu' && settings.kycTier === 'L0' ? 'L1' : settings.kycTier;
 
   const [form, setForm] = useState({
     firstName: '', lastName: '',
@@ -111,13 +112,29 @@ export default function KYCScreen({ navigation, route }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.tierBadge}>{settings.kycTier}</Text>
+      <View style={styles.badgeRow}>
+        <Text style={styles.tierBadge}>{effectiveTier}</Text>
+        {kycRegion === 'eu' && <Text style={styles.regionBadge}>EU</Text>}
+      </View>
       <Text style={styles.title}>Add your personal info</Text>
       <Text style={styles.subtitle}>
         {collectSensitiveFields
           ? 'Enter your name, SSN, and date of birth'
           : 'Enter your full name'}
       </Text>
+
+      {/* EU region card */}
+      {kycRegion === 'eu' && (
+        <View style={styles.regionCard}>
+          <View style={styles.regionCardHeader}>
+            <Text style={styles.regionCardLabel}>KYC Region</Text>
+            <Text style={styles.regionCardValue}>European Union</Text>
+          </View>
+          <Text style={styles.regionCardNote}>
+            EU regulations require full identity verification (name, SSN, and date of birth) before your first crypto purchase.
+          </Text>
+        </View>
+      )}
 
       {/* Name — collected at every tier */}
       <Row label="First Name" value={form.firstName} onChange={set('firstName')} autoCapitalize="words" />
@@ -225,6 +242,7 @@ const s = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   content: { paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32 },
+  badgeRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   tierBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#1a1a2e',
@@ -236,8 +254,42 @@ const styles = StyleSheet.create({
     color: '#635BFF',
     fontSize: 12,
     fontWeight: '700',
-    marginBottom: 12,
   },
+  regionBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1a2e1a',
+    borderWidth: 1,
+    borderColor: '#22c55e',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    color: '#22c55e',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  regionCard: {
+    backgroundColor: '#0d1f0d',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#1a3a1a',
+  },
+  regionCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  regionCardLabel: {
+    color: '#22c55e',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  regionCardValue: { color: '#22c55e', fontSize: 13, fontWeight: '600' },
+  regionCardNote: { color: '#5a8a5a', fontSize: 13, lineHeight: 18 },
   title: { fontSize: 26, fontWeight: '700', color: '#fff', marginBottom: 8 },
   subtitle: { fontSize: 14, color: '#888', marginBottom: 24 },
   testCard: {
