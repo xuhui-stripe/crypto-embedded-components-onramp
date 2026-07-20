@@ -1308,6 +1308,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                       try {
                         const challenge = await props.onramp.getWalletOwnershipChallenge({ walletAddress: newAddr, network: newNet });
                         setWalletChallenge(challenge);
+                        if (!livemode) setWalletSig('abcd');
                         setWalletVerifPhase('signing');
                       } catch (e: any) {
                         props.setError(`Wallet challenge error: ${e?.message || e}`);
@@ -1349,7 +1350,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                     Test mode
                   </Typography>
                   <Typography sx={{ color: '#777', fontSize: '0.8rem' }}>
-                    Paste the challenge message above as the signature to pass verification in test mode.
+                    Use <Box component="span" sx={{ fontFamily: 'monospace', color: '#aaa' }}>abcd</Box> as the signature to bypass verification in test mode (pre-filled).
                   </Typography>
                 </Box>
                 <TextField
@@ -1512,7 +1513,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                 }}
               >
                 <Typography sx={{ color: colors.accent, fontSize: "0.8rem" }}>
-                  Test mode: paste the challenge message above as the signature to pass verification.
+                  Test mode: use <Box component="span" sx={{ fontFamily: 'monospace' }}>abcd</Box> as the signature to bypass verification (pre-filled).
                 </Typography>
               </Box>
 
@@ -2204,6 +2205,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
               try {
                 const challenge = await props.onramp.getWalletOwnershipChallenge({ walletAddress, network });
                 setSessionWalletChallenge(challenge);
+                if (!livemode) setSessionWalletSig('abcd');
                 setSessionWalletVerifPhase(phase);
               } catch (e: any) {
                 setError(e?.message ?? 'Failed to get wallet ownership challenge.');
