@@ -46,7 +46,7 @@ export type CliViewProps = {
     amount: string,
     currency: string,
   ) => Promise<OnrampSession | null>;
-  onCheckout: (sessionId: string) => Promise<void>;
+  onCheckout: (sessionId: string) => Promise<void | 'wallet_ownership_required'>;
   onSelectWallet: (
     wallet: { wallet_address: string; network: string } | null,
   ) => void;
