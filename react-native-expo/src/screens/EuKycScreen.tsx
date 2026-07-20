@@ -32,7 +32,20 @@ import {
 
 // EU-specific SDK methods not yet exposed in useOnramp() — accessed directly
 // through the native module until the JS wrapper is updated.
+// attachKycInfo is also called here (instead of via useOnramp) so that the
+// EU-specific fields (birthCity, birthCountry, nationalities) pass through the
+// bridge without being stripped by the typed wrapper.
 const OnrampNative = NativeModules.OnrampSdk as {
+  attachKycInfo(kycInfo: {
+    firstName?: string;
+    lastName?: string;
+    idNumber?: string;
+    dateOfBirth?: { day: number; month: number; year: number };
+    address?: { line1?: string; city?: string; postalCode?: string; country?: string; state?: string };
+    birthCity?: string;
+    birthCountry?: string;
+    nationalities?: string[];
+  }): Promise<{ error?: { message: string } }>;
   retrieveMissingIdentifiers(): Promise<{
     carfTinRequired: boolean;
     identifiers: { type: string; regulation: string }[];
@@ -86,7 +99,7 @@ const EU_COUNTRY_OPTIONS = Object.entries(EU_COUNTRY_NAMES).sort((a, b) =>
 
 export default function EuKycScreen({ navigation, route }: Props) {
   const { customerId, authToken, country: initialCountry } = route.params;
-  const { attachKycInfo, verifyIdentity } = useOnramp();
+  const { verifyIdentity } = useOnramp();
 
   const [subStep, setSubStep] = useState<EuKycSubStep>('basicInfo');
   const [submitting, setSubmitting] = useState(false);
@@ -130,9 +143,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      // EU-specific KycInfo fields (birthCity, birthCountry, nationalities) are
-      // not in the SDK's TypeScript type yet — cast to any until types are updated.
-      const result = await attachKycInfo({
+      const result = await OnrampNative.attachKycInfo({
         firstName: givenName,
         lastName: surname,
         dateOfBirth: {
@@ -147,7 +158,9 @@ export default function EuKycScreen({ navigation, route }: Props) {
           country,
           ...(addressState ? { state: addressState } : {}),
         },
-        ...({ birthCity, birthCountry, nationalities } as any),
+        birthCity,
+        birthCountry,
+        nationalities,
       });
       if (result.error) {
         setError(`Failed to submit basic info: ${result.error.message}`);
@@ -160,7 +173,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
       setSubmitting(false);
     }
   }, [
-    attachKycInfo, givenName, surname, dobDay, dobMonth, dobYear,
+    givenName, surname, dobDay, dobMonth, dobYear,
     line1, city, postalCode, addressState, country,
     birthCity, birthCountry, nationalities,
   ]);
