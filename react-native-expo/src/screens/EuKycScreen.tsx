@@ -5,19 +5,14 @@
  *   3. Attestation  — Terms of Service via presentUserAttestation()
  *   4. Verify Docs  — document + selfie via verifyIdentity()
  *
- * Mirrors the logic in react-web/src/EuKycStep.tsx using React Native UI.
- *
- * SDK note: retrieveMissingIdentifiers, submitIdentifiers, and
- * presentUserAttestation are defined in the SDK's type system but not yet
- * wrapped in useOnramp(). We call them via NativeModules.OnrampSdk directly
- * until the JS wrapper is updated. The EU-specific KycInfo fields
- * (birthCity, birthCountry, nationalities) are similarly cast with `as any`.
+ * Mirrors the logic in react-web/src/EuKycStep.tsx using React Native UI
+ * and the RN SDK method names (requires @stripe/stripe-react-native >=0.70.0).
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, ActivityIndicator, NativeModules,
+  ScrollView, ActivityIndicator,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -26,45 +21,8 @@ import { useOnramp } from '../hooks/useOnramp';
 import {
   CARF_COUNTRY_TO_TYPE,
   EU_COUNTRY_NAMES,
-  EU_COUNTRIES,
   getIdentifierLabel,
 } from '../euIdentifiers';
-
-// EU-specific SDK methods not yet exposed in useOnramp() — accessed directly
-// through the native module until the JS wrapper is updated.
-// attachKycInfo is also called here (instead of via useOnramp) so that the
-// EU-specific fields (birthCity, birthCountry, nationalities) pass through the
-// bridge without being stripped by the typed wrapper.
-const OnrampNative = NativeModules.OnrampSdk as {
-  attachKycInfo(kycInfo: {
-    firstName?: string;
-    lastName?: string;
-    idNumber?: string;
-    dateOfBirth?: { day: number; month: number; year: number };
-    address?: { line1?: string; city?: string; postalCode?: string; country?: string; state?: string };
-    birthCity?: string;
-    birthCountry?: string;
-    nationalities?: string[];
-  }): Promise<{ error?: { message: string } }>;
-  retrieveMissingIdentifiers(): Promise<{
-    carfTinRequired: boolean;
-    identifiers: { type: string; regulation: string }[];
-    alternatives: { originalMissingIdentifiers: string[]; alternativeMissingIdentifiers: string[] }[];
-    error?: { message: string };
-  }>;
-  submitIdentifiers(identifiers: { type: string; value: string }[]): Promise<{
-    completed: boolean;
-    carfTinRequired: boolean;
-    identifiers: { type: string; regulation: string }[];
-    alternatives: { originalMissingIdentifiers: string[]; alternativeMissingIdentifiers: string[] }[];
-    invalidIdentifiers: string[];
-    error?: { message: string };
-  }>;
-  presentUserAttestation(): Promise<{
-    status?: 'Confirmed';
-    error?: { message: string };
-  }>;
-};
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EuKyc'>;
@@ -99,7 +57,13 @@ const EU_COUNTRY_OPTIONS = Object.entries(EU_COUNTRY_NAMES).sort((a, b) =>
 
 export default function EuKycScreen({ navigation, route }: Props) {
   const { customerId, authToken, country: initialCountry } = route.params;
-  const { verifyIdentity } = useOnramp();
+  const {
+    attachKycInfo,
+    retrieveMissingIdentifiers,
+    submitIdentifiers,
+    presentUserAttestation,
+    verifyIdentity,
+  } = useOnramp();
 
   const [subStep, setSubStep] = useState<EuKycSubStep>('basicInfo');
   const [submitting, setSubmitting] = useState(false);
@@ -143,7 +107,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await OnrampNative.attachKycInfo({
+      const result = await attachKycInfo({
         firstName: givenName,
         lastName: surname,
         dateOfBirth: {
@@ -173,7 +137,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
       setSubmitting(false);
     }
   }, [
-    givenName, surname, dobDay, dobMonth, dobYear,
+    attachKycInfo, givenName, surname, dobDay, dobMonth, dobYear,
     line1, city, postalCode, addressState, country,
     birthCity, birthCountry, nationalities,
   ]);
@@ -184,7 +148,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await OnrampNative.retrieveMissingIdentifiers();
+      const result = await retrieveMissingIdentifiers();
       if (result.error) {
         setError(`Failed to get identifiers: ${result.error.message}`);
         return;
@@ -199,7 +163,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, []);
+  }, [retrieveMissingIdentifiers]);
 
   useEffect(() => {
     if (subStep === 'identifiers' && !requirements) {
@@ -231,7 +195,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     }
 
     try {
-      const result = await OnrampNative.submitIdentifiers(ids);
+      const result = await submitIdentifiers(ids);
       if (result.error) {
         setError(`Identifier submission error: ${result.error.message}`);
         return;
@@ -259,7 +223,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, [requirements, identifierValues, taxCountries, alternativeChoices]);
+  }, [requirements, identifierValues, taxCountries, alternativeChoices, submitIdentifiers]);
 
   // ─── Attestation ────────────────────────────────────────
 
@@ -267,7 +231,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await OnrampNative.presentUserAttestation();
+      const result = await presentUserAttestation();
       if (result.error) {
         setError(`Attestation failed: ${result.error.message}`);
       } else if (result.status === 'Confirmed') {
@@ -280,7 +244,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, []);
+  }, [presentUserAttestation]);
 
   // ─── Verify Documents ────────────────────────────────────
 
@@ -316,7 +280,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
   // ─── Render ─────────────────────────────────────────────
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {/* Header */}
       <Text style={styles.euBadge}>EU</Text>
       <Text style={styles.title}>EU Identity Verification</Text>
@@ -383,7 +347,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
             </Text>
           </TouchableOpacity>
           {showCountryPicker && (
-            <View style={styles.pickerList}>
+            <ScrollView style={styles.pickerList} nestedScrollEnabled>
               {EU_COUNTRY_OPTIONS.map(([code, name]) => (
                 <TouchableOpacity
                   key={code}
@@ -393,7 +357,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
                   <Text style={styles.pickerItemText}>{name} ({code})</Text>
                 </TouchableOpacity>
               ))}
-            </View>
+            </ScrollView>
           )}
 
           <SectionLabel>Birth Details</SectionLabel>
@@ -410,7 +374,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
             </Text>
           </TouchableOpacity>
           {showBirthCountryPicker && (
-            <View style={styles.pickerList}>
+            <ScrollView style={styles.pickerList} nestedScrollEnabled>
               {EU_COUNTRY_OPTIONS.map(([code, name]) => (
                 <TouchableOpacity
                   key={code}
@@ -420,7 +384,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
                   <Text style={styles.pickerItemText}>{name} ({code})</Text>
                 </TouchableOpacity>
               ))}
-            </View>
+            </ScrollView>
           )}
 
           <SectionLabel>Nationalities</SectionLabel>
@@ -522,7 +486,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
                     </Text>
                   </TouchableOpacity>
                   {showTaxCountryPicker && (
-                    <View style={styles.pickerList}>
+                    <ScrollView style={styles.pickerList} nestedScrollEnabled>
                       {EU_COUNTRY_OPTIONS
                         .filter(([code]) => !taxCountries.includes(code) && code !== 'IS')
                         .map(([code, name]) => (
@@ -537,7 +501,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
                             <Text style={styles.pickerItemText}>{name} ({code})</Text>
                           </TouchableOpacity>
                         ))}
-                    </View>
+                    </ScrollView>
                   )}
                 </>
               )}

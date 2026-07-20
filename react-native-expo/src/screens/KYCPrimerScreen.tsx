@@ -113,7 +113,7 @@ export default function KYCPrimerScreen({ navigation, route }: Props) {
       </TouchableOpacity>
 
       {showPicker && (
-        <View style={styles.pickerList}>
+        <ScrollView style={styles.pickerList} nestedScrollEnabled>
           {COUNTRY_OPTIONS.map(opt => (
             <TouchableOpacity
               key={opt.code}
@@ -128,7 +128,7 @@ export default function KYCPrimerScreen({ navigation, route }: Props) {
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       )}
 
       {/* Requirements list — shown after country is chosen */}
