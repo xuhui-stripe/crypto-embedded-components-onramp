@@ -51,12 +51,11 @@ function maskSSN(raw: string): string {
 }
 
 export default function KYCScreen({ navigation, route }: Props) {
-  const { customerId, authToken, kycRegion } = route.params;
+  const { customerId, authToken } = route.params;
   const { settings } = useSettings();
 
-  // EU customers always need at least L1 fields regardless of demo tier setting.
-  const collectSensitiveFields = settings.kycTier !== 'L0' || kycRegion === 'eu';
-  const effectiveTier = kycRegion === 'eu' && settings.kycTier === 'L0' ? 'L1' : settings.kycTier;
+  const collectSensitiveFields = settings.kycTier !== 'L0';
+  const effectiveTier = settings.kycTier;
 
   const [form, setForm] = useState({
     firstName: '', lastName: '',
@@ -114,7 +113,6 @@ export default function KYCScreen({ navigation, route }: Props) {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.badgeRow}>
         <Text style={styles.tierBadge}>{effectiveTier}</Text>
-        {kycRegion === 'eu' && <Text style={styles.regionBadge}>EU</Text>}
       </View>
       <Text style={styles.title}>Add your personal info</Text>
       <Text style={styles.subtitle}>
@@ -123,18 +121,6 @@ export default function KYCScreen({ navigation, route }: Props) {
           : 'Enter your full name'}
       </Text>
 
-      {/* EU region card */}
-      {kycRegion === 'eu' && (
-        <View style={styles.regionCard}>
-          <View style={styles.regionCardHeader}>
-            <Text style={styles.regionCardLabel}>KYC Region</Text>
-            <Text style={styles.regionCardValue}>European Union</Text>
-          </View>
-          <Text style={styles.regionCardNote}>
-            EU regulations require full identity verification (name, SSN, and date of birth) before your first crypto purchase.
-          </Text>
-        </View>
-      )}
 
       {/* Name — collected at every tier */}
       <Row label="First Name" value={form.firstName} onChange={set('firstName')} autoCapitalize="words" />
