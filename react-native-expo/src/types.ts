@@ -37,7 +37,7 @@ export type RootStackParamList = {
   Settings: undefined;
   Auth: undefined;
   Register: { email: string; authToken: string };
-  KYCPrimer: { customerId: string; authToken: string; kycRegion?: string | null };
+  KYCPrimer: { customerId: string; authToken: string; registrationCountry?: string };
   KYC: { customerId: string; authToken: string };
   EuKyc: { customerId: string; authToken: string; country?: string };
   Address: {

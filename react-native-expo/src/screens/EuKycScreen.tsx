@@ -5,15 +5,19 @@
  *   3. Attestation  — Terms of Service via presentUserAttestation()
  *   4. Verify Docs  — document + selfie via verifyIdentity()
  *
- * Mirrors the logic in react-web/src/EuKycStep.tsx using React Native UI
- * and the RN SDK method names (attachKycInfo, retrieveMissingIdentifiers,
- * submitIdentifiers, presentUserAttestation, verifyIdentity).
+ * Mirrors the logic in react-web/src/EuKycStep.tsx using React Native UI.
+ *
+ * SDK note: retrieveMissingIdentifiers, submitIdentifiers, and
+ * presentUserAttestation are defined in the SDK's type system but not yet
+ * wrapped in useOnramp(). We call them via NativeModules.OnrampSdk directly
+ * until the JS wrapper is updated. The EU-specific KycInfo fields
+ * (birthCity, birthCountry, nationalities) are similarly cast with `as any`.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator,
+  ScrollView, ActivityIndicator, NativeModules,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -26,6 +30,29 @@ import {
   getIdentifierLabel,
 } from '../euIdentifiers';
 
+// EU-specific SDK methods not yet exposed in useOnramp() — accessed directly
+// through the native module until the JS wrapper is updated.
+const OnrampNative = NativeModules.OnrampSdk as {
+  retrieveMissingIdentifiers(): Promise<{
+    carfTinRequired: boolean;
+    identifiers: { type: string; regulation: string }[];
+    alternatives: { originalMissingIdentifiers: string[]; alternativeMissingIdentifiers: string[] }[];
+    error?: { message: string };
+  }>;
+  submitIdentifiers(identifiers: { type: string; value: string }[]): Promise<{
+    completed: boolean;
+    carfTinRequired: boolean;
+    identifiers: { type: string; regulation: string }[];
+    alternatives: { originalMissingIdentifiers: string[]; alternativeMissingIdentifiers: string[] }[];
+    invalidIdentifiers: string[];
+    error?: { message: string };
+  }>;
+  presentUserAttestation(): Promise<{
+    status?: 'Confirmed';
+    error?: { message: string };
+  }>;
+};
+
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'EuKyc'>;
   route: RouteProp<RootStackParamList, 'EuKyc'>;
@@ -33,16 +60,11 @@ type Props = {
 
 type EuKycSubStep = 'basicInfo' | 'identifiers' | 'attestation' | 'verifyDocs';
 
-type MissingIdentifier = {
-  type: string;
-  regulation: string;
-};
-
+type MissingIdentifier = { type: string; regulation: string };
 type IdentifierAlternative = {
   originalMissingIdentifiers: string[];
   alternativeMissingIdentifiers: string[];
 };
-
 type IdentifierRequirements = {
   carfTinRequired: boolean;
   identifiers: MissingIdentifier[];
@@ -64,13 +86,7 @@ const EU_COUNTRY_OPTIONS = Object.entries(EU_COUNTRY_NAMES).sort((a, b) =>
 
 export default function EuKycScreen({ navigation, route }: Props) {
   const { customerId, authToken, country: initialCountry } = route.params;
-  const {
-    attachKycInfo,
-    retrieveMissingIdentifiers,
-    submitIdentifiers,
-    presentUserAttestation,
-    verifyIdentity,
-  } = useOnramp();
+  const { attachKycInfo, verifyIdentity } = useOnramp();
 
   const [subStep, setSubStep] = useState<EuKycSubStep>('basicInfo');
   const [submitting, setSubmitting] = useState(false);
@@ -108,13 +124,15 @@ export default function EuKycScreen({ navigation, route }: Props) {
     if (!givenName || !surname || !dobDay || !dobMonth || !dobYear ||
         !line1 || !city || !postalCode || !country ||
         !birthCity || !birthCountry || nationalities.length === 0) {
-      Alert.alert('Error', 'Please fill in all required fields.');
+      setError('Please fill in all required fields.');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      await attachKycInfo({
+      // EU-specific KycInfo fields (birthCity, birthCountry, nationalities) are
+      // not in the SDK's TypeScript type yet — cast to any until types are updated.
+      const result = await attachKycInfo({
         firstName: givenName,
         lastName: surname,
         dateOfBirth: {
@@ -129,10 +147,12 @@ export default function EuKycScreen({ navigation, route }: Props) {
           country,
           ...(addressState ? { state: addressState } : {}),
         },
-        birthCity,
-        birthCountry,
-        nationalities,
+        ...({ birthCity, birthCountry, nationalities } as any),
       });
+      if (result.error) {
+        setError(`Failed to submit basic info: ${result.error.message}`);
+        return;
+      }
       setSubStep('identifiers');
     } catch (e: any) {
       setError(`Failed to submit basic info: ${e?.message ?? e}`);
@@ -151,7 +171,11 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await retrieveMissingIdentifiers();
+      const result = await OnrampNative.retrieveMissingIdentifiers();
+      if (result.error) {
+        setError(`Failed to get identifiers: ${result.error.message}`);
+        return;
+      }
       setRequirements({
         carfTinRequired: result.carfTinRequired ?? false,
         identifiers: result.identifiers ?? [],
@@ -162,7 +186,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, [retrieveMissingIdentifiers]);
+  }, []);
 
   useEffect(() => {
     if (subStep === 'identifiers' && !requirements) {
@@ -194,8 +218,11 @@ export default function EuKycScreen({ navigation, route }: Props) {
     }
 
     try {
-      const result = await submitIdentifiers(ids);
-
+      const result = await OnrampNative.submitIdentifiers(ids);
+      if (result.error) {
+        setError(`Identifier submission error: ${result.error.message}`);
+        return;
+      }
       if (result.invalidIdentifiers && result.invalidIdentifiers.length > 0) {
         setInvalidIdentifiers(result.invalidIdentifiers);
         setRequirements({
@@ -219,7 +246,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, [requirements, identifierValues, taxCountries, alternativeChoices, submitIdentifiers]);
+  }, [requirements, identifierValues, taxCountries, alternativeChoices]);
 
   // ─── Attestation ────────────────────────────────────────
 
@@ -227,7 +254,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const result = await presentUserAttestation();
+      const result = await OnrampNative.presentUserAttestation();
       if (result.error) {
         setError(`Attestation failed: ${result.error.message}`);
       } else if (result.status === 'Confirmed') {
@@ -240,7 +267,7 @@ export default function EuKycScreen({ navigation, route }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, [presentUserAttestation]);
+  }, []);
 
   // ─── Verify Documents ────────────────────────────────────
 
@@ -248,7 +275,11 @@ export default function EuKycScreen({ navigation, route }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await verifyIdentity();
+      const result = await verifyIdentity();
+      if (result.error) {
+        setError(`Verification error: ${result.error.message}`);
+        return;
+      }
       navigation.navigate('Wallet', { customerId, authToken });
     } catch (e: any) {
       setError(`Verification error: ${e?.message ?? e}`);

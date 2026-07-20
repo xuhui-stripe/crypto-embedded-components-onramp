@@ -67,7 +67,6 @@ export default function RegisterScreen({ navigation, route }: Props) {
 
       const customerRes = await getCryptoCustomer(authResult.customerId, authToken);
       const kyc_level = customerRes.success ? customerRes.data.kyc_level : null;
-      const kyc_region = customerRes.success ? customerRes.data.kyc_region : null;
 
       if (kyc_level === 'L0' || kyc_level === 'L1' || kyc_level === 'L2' || kyc_level === 'PENDING') {
         navigation.navigate('Wallet', { customerId: authResult.customerId, authToken });
@@ -75,7 +74,7 @@ export default function RegisterScreen({ navigation, route }: Props) {
         navigation.navigate('KYCPrimer', {
           customerId: authResult.customerId,
           authToken,
-          kycRegion: kyc_region,
+          registrationCountry: country,
         });
       }
     } catch (err: any) {
