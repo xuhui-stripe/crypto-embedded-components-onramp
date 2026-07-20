@@ -31,7 +31,7 @@ import { getTheme } from "./theme";
 import { LOCAL_LIMITS } from "./kycLimits";
 import { EXPLORER_URLS, getNetworks, isEuCountry, EU_COUNTRIES } from "./shared";
 import { EU_COUNTRY_NAMES } from "./euIdentifiers";
-import type { AccountStatus, KycLevel, KycRegion, Wallet, OnrampSession } from "./types";
+import type { AccountStatus, KycLevel, KycRegion, Wallet, OnrampSession, CheckoutError } from "./types";
 import { EuKycStep } from "./EuKycStep";
 
 export type WizardViewProps = {
@@ -69,7 +69,7 @@ export type WizardViewProps = {
     currency: string,
     sourceCurrency: string,
   ) => Promise<OnrampSession | null>;
-  onCheckout: (sessionId: string) => Promise<void | 'wallet_ownership_required'>;
+  onCheckout: (sessionId: string) => Promise<void | CheckoutError>;
   onSelectWallet: (
     wallet: { wallet_address: string; network: string } | null,
   ) => void;
@@ -552,7 +552,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
         setBuySubStep('polling');
         try {
           const checkoutRes = await props.onCheckout(session.id);
-          if (checkoutRes === 'wallet_ownership_required') {
+          if (checkoutRes?.code === 'wallet_ownership_required') {
             setBuySubStep('confirm');
             setError('Wallet ownership verification still required after signature submission.');
             return;
@@ -1757,7 +1757,7 @@ export const WizardView: React.FC<WizardViewProps> = (props) => {
                     setBuySubStep("polling");
                     try {
                       const result = await props.onCheckout(session.id);
-                      if (result === 'wallet_ownership_required') {
+                      if (result?.code === 'wallet_ownership_required') {
                         setBuySubStep('confirm');
                         setPendingWalletVerifConfirm({
                           phase: 'signing_for_checkout',

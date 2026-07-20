@@ -42,6 +42,12 @@ export type OnrampSession = {
   };
 };
 
+export type CheckoutErrorCode = 'wallet_ownership_required';
+
+export type CheckoutError = {
+  code: CheckoutErrorCode;
+};
+
 export type MissingIdentifier = {
   type: string;
   regulation: string;

@@ -22,7 +22,7 @@ import type {
 } from "@stripe/crypto";
 import { loadCryptoOnrampAndInitialize } from "@stripe/crypto";
 import { LinkAuthenticationModal } from "./LinkAuthenticationModal";
-import type { AccountStatus, KycLevel, KycRegion } from "./types";
+import type { AccountStatus, KycLevel, KycRegion, CheckoutError } from "./types";
 
 function timestamp(): string {
   return new Date().toLocaleTimeString(undefined, {
@@ -482,7 +482,7 @@ const ExampleAppInner: React.FC<{
   ]);
 
   const handleCheckout = useCallback(
-    async (sessionId: string): Promise<void | 'wallet_ownership_required'> => {
+    async (sessionId: string): Promise<void | CheckoutError> => {
       setLoading(true);
       setError(null);
       log("Checking out onramp session", `sessionId=${sessionId}`);
@@ -519,7 +519,7 @@ const ExampleAppInner: React.FC<{
       } catch (e) {
         if (e instanceof Error && e.message === 'wallet_ownership_verification_required') {
           setLoading(false);
-          return 'wallet_ownership_required';
+          return { code: 'wallet_ownership_required' };
         }
         surfaceError("Checkout error", e);
       } finally {
